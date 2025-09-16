@@ -1,0 +1,401 @@
+## 深度爬取过滤器与评分器架构
+
+智能深度爬取的高级URL过滤、评分策略与性能优化工作流程的可视化呈现。
+
+### 过滤器链处理流程
+
+```mermaid
+flowchart TD
+    A[URL输入] --> B{域名过滤器}
+    B -->|✓ 通过| C{模式过滤器}
+    B -->|✗ 失败| X1[拒绝：无效域名]
+    
+    C -->|✓ 通过| D{内容类型过滤器}
+    C -->|✗ 失败| X2[拒绝：模式不匹配]
+    
+    D -->|✓ 通过| E{SEO过滤器}
+    D -->|✗ 失败| X3[拒绝：错误内容类型]
+    
+    E -->|✓ 通过| F{内容相关性过滤器}
+    E -->|✗ 失败| X4[拒绝：低SEO评分]
+    
+    F -->|✓ 通过| G[URL已接受]
+    F -->|✗ 失败| X5[拒绝：低相关性]
+    
+    G --> H[添加到爬取队列]
+    
+    subgraph "快速过滤器"
+        B
+        C
+        D
+    end
+    
+    subgraph "慢速过滤器"
+        E
+        F
+    end
+    
+    style A fill:#e3f2fd
+    style G fill:#c8e6c9
+    style H fill:#e8f5e8
+    style X1 fill:#ffcdd2
+    style X2 fill:#ffcdd2
+    style X3 fill:#ffcdd2
+    style X4 fill:#ffcdd2
+    style X5 fill:#ffcdd2
+```
+
+### URL评分系统架构
+
+```mermaid
+graph TB
+    subgraph "输入URL"
+        A[https://python.org/tutorial/2024/ml-guide.html]
+    end
+    
+    subgraph "独立评分器"
+        B[关键词相关性评分器]
+        C[路径深度评分器]
+        D[内容类型评分器]
+        E[新鲜度评分器]
+        F[域名权威性评分器]
+    end
+    
+    subgraph "评分过程"
+        B --> B1[关键词：python, tutorial, ml<br/>评分：0.85]
+        C --> C1[深度：4级<br/>最优：3级<br/>评分：0.75]
+        D --> D1[内容：HTML<br/>评分：1.0]
+        E --> E1[年份：2024<br/>评分：1.0]
+        F --> F1[域名：python.org<br/>评分：1.0]
+    end
+    
+    subgraph "综合评分"
+        G[加权组合]
+        B1 --> G
+        C1 --> G
+        D1 --> G
+        E1 --> G
+        F1 --> G
+    end
+    
+    subgraph "最终结果"
+        H[综合评分：0.92]
+        I{评分 > 阈值？}
+        J[接受URL]
+        K[拒绝URL]
+    end
+    
+    A --> B
+    A --> C
+    A --> D
+    A --> E
+    A --> F
+    
+    G --> H
+    H --> I
+    I -->|✓ 0.92 > 0.6| J
+    I -->|✗ 评分过低| K
+    
+    style A fill:#极浅蓝
+    style G fill:#浅橙
+    style H fill:#浅绿
+    style J fill:#浅绿
+    style K fill:#浅红
+```
+
+### 过滤器与评分器决策矩阵
+
+```mermaid
+flowchart TD
+    A[URL处理决策] --> B{需要二元决策？}
+    
+    B -->|是 - 包含/排除| C[使用过滤器]
+    B -->|否 - 质量评级| D[使用评分器]
+    
+    C --> C1{需要过滤器类型？}
+    C1 -->|域名控制| C2[域名过滤器]
+    C1 -->|模式匹配| C3[URL模式过滤器]
+    C1 -->|内容类型| C4[内容类型过滤器]
+    C1 -->|SEO质量| C5[SEO过滤器]
+    C1 -->|内容相关性| C6[内容相关性过滤器]
+    
+    D --> D1{评分标准？}
+    D1 -->|关键词相关性| D2[关键词相关性评分器]
+    D1 -->|URL结构| D3[路径深度评分器]
+    D1 -->|内容质量| D4[内容类型评分器]
+    D极 -->|时间敏感性| D5[新鲜度评分器]
+    D1 -->|来源权威性| D6[域名权威性评分器]
+    
+    C2 --> E[链式过滤器]
+    C3 --> E
+    C4 -->极 E
+    C5 --> E
+    C6 --> E
+    
+    D2 --> F[综合评分器]
+    D3 --> F
+    D4 --> F
+    D5 --> F
+    D6 --> F
+    
+    E --> G[二元输出：通过/失败]
+    F --> H[数字评分：0.0-1.0]
+    
+    G --> I[应用到URL队列]
+    H --> J[优先级排序]
+    
+    style C fill:#浅绿
+    style D fill:#浅橙
+    style E fill:#浅紫
+    style F fill:#极浅蓝
+    style G fill:#浅绿
+    style H fill:#浅黄
+```
+
+### 性能优化策略
+
+```mermaid
+sequenceDiagram
+    participant Queue as URL队列
+    participant Fast as 快速过滤器
+    participant Slow as 慢速过滤器
+    participant Score as 评分器
+    participant Output as 已过滤URL
+    
+    Note over Queue, Output: 批处理（1000个URL）
+    
+    Queue->>Fast: 应用域名过滤器
+    Fast-->>Queue: 60%通过（600个URL）
+    
+    Queue->>Fast: 应用模式过滤器
+    Fast-->>Queue: 70%通过（420个URL）
+    
+    Queue->>Fast: 应用内容类型过滤器
+    Fast-->>Queue: 90%通过（378个URL）
+    
+    Note over Fast: 快速过滤器淘汰62%的URL
+    
+    Queue->>Slow: 应用SEO过滤器（378个URL）
+    Slow-->>Queue: 80%通过（302个URL）
+    
+    Queue->>Slow: 应用相关性过滤器
+    Slow-->>Queue: 75%通过（227个URL）
+    
+    Note over Slow: 对剩余URL进行内容分析
+    
+    Queue->>Score: 计算综合评分
+    Score-->>Queue: 评分与排序
+    
+    Queue->极>Output: 前100个评分最高的URL
+    Output-->>Queue: 处理完成
+    
+    Note over Queue, Output: 总计：90%被过滤，保留10%高质量URL
+```
+
+### 自定义过滤器实现流程
+
+```mermaid
+stateDiagram-v2
+    [*] --> 规划
+    
+    规划 --> 识别需求: 定义过滤标准
+    识别需求 --> 选择类型: 二元与评分决策
+    
+    选择类型 --> 过滤器实现: 需要二元决策
+    选择类型 --> 评分器实现: 需要质量评级
+    
+    过滤器实现 --> 继承URL过滤器: 扩展URLFilter基类
+    评分器实现 --> 继承URL评分器: 扩展URLScorer基类
+    
+    继承URL过滤器 --> 实现应用: def apply(url) -> bool
+    继承URL评分器 --> 实现评分: def _calculate_score(url) -> float
+    
+    实现应用 --> 添加逻辑: 添加自定义过滤逻辑
+    实现评分 --> 添加逻辑
+    
+    添加逻辑 --> 测试过滤器: 单元测试
+    测试过滤器 --> 优化性能: 性能优化
+    
+    优化性能 --> 集成: 与过滤器链集成
+    集成 --> 生产: 部署到生产环境
+    
+    生产 --> 监控: 监控性能
+    监控 --> 调优: 调整参数
+    调优 --> 生产
+    
+    note right of 规划 : 考虑性能影响
+    note right of 添加逻辑 : 处理边缘情况
+    note right of 优化性能 : 缓存频繁访问的数据
+```
+
+### 过滤器链优化模式
+
+```mermaid
+graph TB
+    subgraph "朴素方法 - 性能差"
+        A1[所有URL] --> B1[慢速过滤器1]
+        B1 --> C1[慢速过滤器2]
+        C1 --> D1[快速过滤器1]
+        D1 --> E1[快速过滤器2]
+        E1 --> F1[最终结果]
+        
+        B1 -.->|高CPU| G1[性能问题]
+        C1 -.->|网络调用| G1
+    end
+    
+    subgraph "优化方法 - 高性能"
+        A2[所有URL] --> B2[快速过滤器1]
+        B2 --> C2[快速过滤器2]
+        C2 --> D2[批处理]
+        D2 --> E2[慢速过滤器1]
+        E2 --> F2[慢速过滤器2]
+        F2 --> G2[最终结果]
+        
+        D2 --> H2[并发处理]
+        H2 --> I2[信号量控制]
+    end
+    
+    subgraph "性能指标"
+        J[处理时间]
+        K[内存使用]
+        L[CPU利用率]
+        M[网络请求]
+    end
+    
+    G1 -.-> J
+    G1 -.-> K
+    G1 -.-> L
+    G1 -.-> M
+    
+    G2 -.-> J
+    G2 -.-> K
+    G2 -.-> L
+    G2 -.-> M
+    
+    style A1 fill:#浅红
+    style G1 fill:#浅红
+    style A2 fill:#浅绿
+    style G2 fill:#浅绿
+    style H2 fill:#浅绿
+    style I2 fill:#浅绿
+```
+
+### 综合评分权重分布
+
+```mermaid
+pie title 综合评分器权重分布
+    "关键词相关性 (30%)" : 30
+    "域名权威性 (25%)" : 25
+    "内容类型 (20%)" : 20
+    "新鲜度 (15%)" : 15
+    "路径深度 (10%)" : 10
+```
+
+### 深度爬取集成架构
+
+```mermaid
+graph TD
+    subgraph "深度爬取策略"
+        A[起始URL] --> B[提取链接]
+        B --> C[应用过滤器链]
+        C --> D[计算评分]
+        D --> E[优先级队列]
+        E --> F[爬取下一个URL]
+        F --> B
+    end
+    
+    subgraph "过滤器链组件"
+        C --> C1[域名过滤器]
+        C --> C2[模式过滤器]
+        C --> C3[内容过滤器]
+        C --> C4[SEO过滤器]
+        C --> C5[相关性过滤器]
+    end
+    
+    subgraph "评分组件"
+        D --> D1[关键词评分器]
+        D --> D2[深度评分器]
+        D --> D3[新鲜度评分器]
+        D --> D4[权威性评分器]
+        D --> D5[综合评分]
+    end
+    
+    subgraph "队列管理"
+        E --> E1{评分 > 阈值？}
+        E1 -->|是| E2[高优先级队列]
+        E1 -->|否| E3[低优先级队列]
+        E2 --> F
+        E3 --> G[延迟处理]
+    end
+    
+    subgraph "控制流"
+        H{达到最大深度？}
+        I{达到最大页面数？}
+        J[停止爬取]
+    end
+    
+    F --> H
+    H -->|否| I
+    H -->|是| J
+    I -->|否| B
+    I -->|是极| J
+    
+    style A fill:#极浅蓝
+    style E2 fill:#浅绿
+    style E3 fill:#浅橙
+    style J fill:#浅红
+```
+
+### 过滤器性能对比
+
+```mermaid
+xychart-beta
+    title "过滤器性能对比（1000个URL）"
+    x-axis [域名, 模式, 内容类型, SEO, 相关性]
+    y-axis "处理时间（毫秒）" 0 --> 1000
+    bar [50, 80, 45, 300, 800]
+```
+
+### 评分算法工作流程
+
+```mermaid
+flowchart TD
+    A[输入URL] --> B[解析URL组件]
+    B --> C[提取特征]
+    
+    C --> D[域名分析]
+    C --> E[路径分析] 
+    C --> F[内容类型检测]
+    C --> G[关键词提取]
+    C --> H[新鲜度检测]
+    
+    D --> I[域名权威性评分]
+    E --> J[路径深度评分]
+    F --> K[内容类型评分]
+    G --> L[关键词相关性评分]
+    H --> M[新鲜度评分]
+    
+    I --> N[应用权重]
+    J --> N
+    K --> N
+    L --> N
+    M --> N
+    
+    N --> O[标准化评分]
+    O --> P[计算最终评分]
+    P --> Q{评分 >= 阈值？}
+    
+    Q -->|是| R[接受爬取]
+    Q -->|否| S[拒绝URL]
+    
+    R --> T[添加到优先级队列]
+    S --> U[记录拒绝原因]
+    
+    style A fill:#极浅蓝
+    style P fill:#浅橙
+    style R fill:#浅绿
+    style S fill:#浅红
+    style T fill:#浅绿
+```
+
+**📖 了解更多：** [深度爬取策略](https://docs.crawl4ai.com/core/deep-crawling/), [性能优化](https://docs.crawl4ai.com/advanced/performance-tuning/), [自定义实现](https://docs.crawl4ai.com/advanced/custom-filters/)

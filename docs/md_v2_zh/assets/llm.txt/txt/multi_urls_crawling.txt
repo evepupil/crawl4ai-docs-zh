@@ -1,0 +1,339 @@
+## 多URL爬取
+
+通过智能资源管理、速率限制和实时监控实现多URL并发爬取。
+
+### 基础多URL爬取
+
+```python
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+
+# 批处理模式（默认）- 一次性获取所有结果
+async def batch_crawl():
+    urls = [
+        "https://example.com/page1",
+        "https://example.com/page2", 
+        "https://example.com/page3"
+    ]
+    
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        stream=False  # 默认：批处理模式
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun_many(urls, config=config)
+        
+        for result in results:
+            if result.success:
+                print(f"✅ {result.url}: {len(result.markdown)} 字符")
+            else:
+                print(f"❌ {result.url}: {result.error_message}")
+
+# 流式处理 - 即时处理完成的结果
+async def streaming_crawl():
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        stream=True  # 启用流式处理
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        # 实时处理完成的结果
+        async for result in await crawler.arun_many(urls, config=config):
+            if result.success:
+                print(f"🔥 刚刚完成: {result.url}")
+                await process_result_immediately(result)
+            else:
+                print(f"❌ 失败: {result.url}")
+```
+
+### 内存自适应调度
+
+```python
+from crawl4ai import AsyncWebCrawler, MemoryAdaptiveDispatcher, CrawlerMonitor, DisplayMode
+
+# 基于系统内存自动管理并发
+async def memory_adaptive_crawl():
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=80.0,  # 内存超过80%时暂停
+        check_interval=1.0,             # 每秒检查内存
+        max_session_permit=15,          # 最大并发任务数
+        memory_wait_timeout=300.0       # 最多等待5分钟释放内存
+    )
+    
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        word_count_threshold=50
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun_many(
+            urls=large_url_list,
+            config=config,
+            dispatcher=dispatcher
+        )
+        
+        # 每个结果包含调度信息
+        for result in results:
+            if result.dispatch_result:
+                dr = result.dispatch_result
+                print(f"内存使用: {dr.memory_usage:.1f}MB")
+                print(f"耗时: {dr.end_time - dr.start_time}")
+```
+
+### 速率限制爬取
+
+```python
+from crawl4ai import RateLimiter, SemaphoreDispatcher
+
+# 控制请求节奏并处理服务器速率限制
+async def rate_limited_crawl():
+    rate_limiter = RateLimiter(
+        base_delay=(1.0, 3.0),          # 随机延迟1-3秒
+        max_delay=60.0,                 # 最大退避时间60秒
+        max_retries=3,                  # 失败请求重试3次
+        rate_limit_codes=[429, 503]     # 处理这些状态码
+    )
+    
+    dispatcher = SemaphoreDispatcher(
+        max_session_permit=5,           # 固定并发限制
+        rate_limiter=rate_limiter
+    )
+    
+    config = CrawlerRunConfig(
+        user_agent_mode="random",       # 随机化用户代理
+        simulate_user=True              # 模拟用户行为
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun_many(
+            urls=urls,
+            config=config,
+            dispatcher=dispatcher
+        ):
+            print(f"已处理: {result.url}")
+```
+
+### 实时监控
+
+```python
+from crawl4ai import CrawlerMonitor, DisplayMode
+
+# 实时监控爬取进度
+async def monitored_crawl():
+    monitor = CrawlerMonitor(
+        max_visible_rows=20,                    # 显示20个任务
+        display_mode=DisplayMode.DETAILED       # 显示详细任务信息
+    )
+    
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=75.0,
+        max_session_permit=10,
+        monitor=monitor  # 将监控器附加到调度器
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun_many(
+            urls=urls,
+            dispatcher=dispatcher
+        )
+```
+
+### 高级调度器配置
+
+```python
+# 带全面监控的内存自适应调度器
+memory_dispatcher = MemoryAdaptiveDispatcher(
+    memory_threshold_percent=85.0,      # 更高内存容忍度
+    check_interval=0.5,                 # 更频繁检查内存
+    max_session_permit=20,              # 更多并发任务
+    memory_wait_timeout=600.0,          # 更长内存等待时间
+    rate_limiter=RateLimiter(
+        base_delay=(0.5, 1.5),
+        max_delay=30.0,
+        max_retries=5
+    ),
+    monitor=CrawlerMonitor(
+        max_visible_rows=15,
+        display_mode=DisplayMode.AGGREGATED  # 摘要视图
+    )
+)
+
+# 简单的信号量调度器
+semaphore_dispatcher = SemaphoreDispatcher(
+    max_session_permit=8,               # 固定并发数
+    rate_limiter=RateLimiter(
+        base_delay=(1.0, 2.0),
+        max_delay=20.0
+    )
+)
+
+# 使用自定义调度器
+async with AsyncWebCrawler() as crawler:
+    results = await crawler.arun_many(
+        urls=urls,
+        config=config,
+        dispatcher=memory_dispatcher  # 或 semaphore_dispatcher
+    )
+```
+
+### 处理大规模爬取
+
+```python
+async def large_scale_crawl():
+    # 处理数千个URL
+    urls = load_urls_from_file("large_url_list.txt")  # 10,000+个URL
+    
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=70.0,  # 保守内存使用
+        max_session_permit=25,          # 更高并发数
+        rate_limiter=RateLimiter(
+            base_delay=(0.1, 0.5),      # 大批量处理时更快
+            max_retries=2               # 较少重试以提高速度
+        ),
+        monitor=CrawlerMonitor(display_mode=DisplayMode.AGGREGATED)
+    )
+    
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.ENABLED,   # 使用缓存提高效率
+        stream=True,                    # 流式处理节省内存
+        word_count_threshold=100,       # 跳过短内容
+        exclude_external_links=True     # 减少处理开销
+    )
+    
+    successful_crawls = 0
+    failed_crawls = 0
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun_many(
+            urls=urls,
+            config=config,
+            dispatcher=dispatcher
+        ):
+            if result.success:
+                successful_crawls += 1
+                await save_result_to_database(result)
+            else:
+                failed_crawls += 1
+                await log_failure(result.url, result.error_message)
+            
+            # 进度报告
+            if (successful_crawls + failed_crawls) % 100 == 0:
+                print(f"进度: {successful_crawls + failed_crawls}/{len(urls)}")
+    
+    print(f"完成: {successful_crawls} 成功, {failed_crawls} 失败")
+```
+
+### Robots.txt合规性
+
+```python
+async def compliant_crawl():
+    config = CrawlerRunConfig(
+        check_robots_txt=True,          # 遵守robots.txt
+        user_agent="MyBot/1.0",         # 标识您的机器人
+        mean_delay=2.0,                 # 礼貌延迟
+        max_range=1.0
+    )
+    
+    dispatcher = SemaphoreDispatcher(
+        max_session_permit=3,           # 保守并发数
+        rate_limiter=RateLimiter(
+            base_delay=(2.0, 5.0),      # 更慢速、更礼貌
+            max_retries=1
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun_many(
+            urls=urls,
+            config=config,
+            dispatcher=dispatcher
+        ):
+            if result.success:
+                print(f"✅ 已爬取: {result.url}")
+            elif "robots.txt" in result.error_message:
+                print(f"🚫 被robots.txt阻止: {result.url}")
+            else:
+                print(f"❌ 错误: {result.url}")
+```
+
+### 性能分析
+
+```python
+async def analyze_crawl_performance():
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=80.0,
+        max_session_permit=12,
+        monitor=CrawlerMonitor(display_mode=DisplayMode.DETAILED)
+    )
+    
+    start_time = time.time()
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun_many(
+            urls=urls,
+            dispatcher=dispatcher
+        )
+    
+    end_time = time.time()
+    
+    # 分析结果
+    successful = [r for r in results if r.success]
+    failed = [r for r in results if not r.success]
+    
+    print(f"总时间: {end_time - start_time:.2f}秒")
+    print(f"成功率: {len(successful)}/{len(results)} ({len(successful)/len(results)*100:.1f}%)")
+    print(f"单URL平均时间: {(end_time - start_time)/len(results):.2f}秒")
+    
+    # 内存使用分析
+    if successful and successful[0].dispatch_result:
+        memory_usage = [r.dispatch_result.memory_usage for r in successful if r.dispatch_result]
+        peak_memory = [r.dispatch_result.peak_memory for r in successful if r.dispatch_result]
+        
+        print(f"平均内存使用: {sum(memory_usage)/len(memory_usage):.1f}MB")
+        print(f"峰值内存使用: {max(peak_memory):.1f}MB")
+```
+
+### 错误处理与恢复
+
+```python
+async def robust_multi_crawl():
+    failed_urls = []
+    
+    config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        stream=True,
+        page_timeout=30000  # 30秒超时
+    )
+    
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=85.0,
+        max_session_permit=10
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun_many(
+            urls=urls,
+            config=config,
+            dispatcher=dispatcher
+        ):
+            if result.success:
+                await process_successful_result(result)
+            else:
+                failed_urls.append({
+                    'url': result.url,
+                    'error': result.error_message,
+                    'status_code': result.status_code
+                })
+                
+                # 特定错误的重试逻辑
+                if result.status_code in [503, 429]:  # 服务器错误
+                    await schedule_retry(result.url)
+    
+    # 报告失败情况
+    if failed_urls:
+        print(f"未能爬取 {len(failed_urls)} 个URL:")
+        for failure in failed_urls[:10]:  # 显示前10个
+            print(f"  {failure['url']}: {failure['error']}")
+```
+
+**📖 了解更多:** [高级多URL爬取](https://docs.crawl4ai.com/advanced/multi-url-crawling/), [爬取调度器](https://docs.crawl4ai.com/advanced/crawl-dispatcher/), [arun_many() API参考](https://docs.crawl4ai.com/api/arun_many/)

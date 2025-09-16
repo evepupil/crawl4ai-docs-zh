@@ -1,0 +1,826 @@
+## Docker 部署
+
+使用预构建镜像、API 端点、配置和 MCP 集成的完整 Docker 部署指南。
+
+### 使用预构建镜像快速开始
+
+```bash
+# 拉取最新镜像
+docker pull unclecode/crawl4ai:latest
+
+# 设置 LLM API 密钥
+cat > .llm.env << EOL
+OPENAI_API_KEY=sk-your-key
+ANTHROPIC_API_KEY=your-anthropic-key
+GROQ_API_KEY=your-groq-key
+GEMINI_API_TOKEN=your-gemini-token
+EOL
+
+# 带 LLM 支持运行
+docker run -d \
+  -p 11235:11235 \
+  --name crawl4ai \
+  --env-file .llm.env \
+  --shm-size=1g \
+  unclecode/crawl4ai:latest
+
+# 基础运行（无 LLM）
+docker run -d \
+  -p 11235:11235 \
+  --name crawl4ai \
+  --shm-size=1g \
+  unclecode/crawl4ai:latest
+
+# 检查健康状态
+curl http://localhost:11235/health
+```
+
+### Docker Compose 部署
+
+```bash
+# 克隆并设置
+git clone https://github.com/unclecode/crawl4ai.git
+cd crawl4ai
+cp deploy/docker/.llm.env.example .llm.env
+# 编辑 .llm.env 填入你的 API 密钥
+
+# 运行预构建镜像
+IMAGE=unclecode/crawl4ai:latest docker compose up -d
+
+# 本地构建
+docker compose up --build -d
+
+# 构建全功能版本
+INSTALL_TYPE=all docker compose up --build -d
+
+# 构建 GPU 支持版本
+ENABLE_GPU=true docker compose up --build -d
+
+# 停止服务
+docker compose down
+```
+
+### 手动构建多架构镜像
+
+```bash
+# 克隆仓库
+git clone https://github.com/unclecode/crawl4ai.git
+cd crawl4ai
+
+# 为当前架构构建
+docker buildx build -t crawl4ai-local:latest --load .
+
+# 为多架构构建
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t crawl4ai-local:latest --load .
+
+# 构建特定功能版本
+docker buildx build \
+  --build-arg INSTALL_TYPE=all \
+  --build-arg ENABLE_GPU=false \
+  -t crawl4ai-local:latest --load .
+
+# 运行自定义构建
+docker run -d \
+  -p 11235:11235 \
+  --name crawl4ai-custom \
+  --env-file .llm.env \
+  --shm-size=1g \
+  crawl4ai-local:latest
+```
+
+### 构建参数
+
+```bash
+# 可用构建选项
+docker buildx build \
+  --build-arg INSTALL_TYPE=all \     # default|all|torch|transformer
+  --build-arg ENABLE_GPU=true \      # true|false
+  --build-arg APP_HOME=/app \        # 安装路径
+  --build-arg USE_LOCAL=true \       # 使用本地源码
+  --build-arg GITHUB_REPO=url \      # 如果 USE_LOCAL=false 则使用 Git 仓库
+  --build-arg GITHUB_BRANCH=main \   # Git 分支
+  -t crawl4ai-custom:latest --load .
+```
+
+### 核心 API 端点
+
+```python
+# 主要爬取端点
+import requests
+import json
+
+# 基础爬取
+payload = {
+    "urls": ["https://example.com"],
+    "browser_config": {"type": "BrowserConfig", "params": {"headless": True}},
+    "crawler_config": {"type": "CrawlerRunConfig", "params": {"cache_mode": "bypass"}}
+}
+response = requests.post("http://localhost:11235/crawl", json=payload)
+
+# 流式爬取
+payload["crawler_config"]["params"]["stream"] = True
+response = requests.post("http://localhost:11235/crawl/stream", json=payload)
+
+# 健康检查
+response = requests.get("http://localhost:11235/health")
+
+# API 模式
+response = requests.get("http://localhost:11235/schema")
+
+# 指标（Prometheus 格式）
+response = requests.get("http://localhost:11235/metrics")
+```
+
+### 专用端点
+
+```python
+# HTML 提取（预处理用于模式）
+response = requests.post("http://localhost:11235/html", 
+    json={"url": "https://example.com"})
+
+# 截图捕获
+response = requests.post("http://localhost:11235/screenshot", json={
+    "极客": "https://example.com",
+    "screenshot_wait_for": 2,
+    "output_path": "/path/to/save/screenshot.png"
+})
+
+# PDF 生成
+极客 = requests.post("http://localhost:11235/pdf", json={
+    "url": "https://example.com",
+    "output_path": "/极客/to/save/document.pdf"
+})
+
+# JavaScript 执行
+response = requests.post("http://localhost:11235/execute_js", json={
+    "url": "https://example.com",
+    "scripts": [
+        "return document.title",
+        "return Array.from(document.querySelectorAll('a')).map(a => a.href)"
+    ]
+})
+
+# Markdown 生成
+response = requests.post("极客://localhost:11235/md", json={
+    "url": "https://example.com",
+    "f": "fit",  # raw|fit|bm25|llm
+    "q": "extract main content",  # 过滤查询
+    "c": "0"  # 缓存: 0=bypass, 1=use
+})
+
+# LLM 问答
+response = requests.get("http://localhost:11235/llm/https://example.com?q=What is this page about?")
+
+# 库上下文（用于 AI 助手）
+response = requests.get("http://localhost:11235/ask", params={
+    "context_type": "all",  # code|doc|all
+    "query": "how to use extraction strategies",
+    "score_ratio": 0.5,
+    "max_results": 20
+})
+```
+
+### Python SDK 使用
+
+```python
+import asyncio
+from crawl4ai.docker_client import Craw极客DockerClient
+from crawl4ai import BrowserConfig, CrawlerRunConfig, CacheMode
+
+async def main():
+    async with Crawl4aiDockerClient(base_url="http://localhost:11235") as client:
+        # 非流式爬取
+        results = await client.crawl(
+            ["https://example.com"],
+            browser_config=BrowserConfig(headless=True),
+            crawler_config=CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+        )
+        
+        for result in results:
+            print(f"URL: {result.url}, Success: {result.success}")
+            print(f"Content length: {len(result.markdown)}")
+        
+        # 流式爬取
+        stream_config = CrawlerRunConfig(stream=True, cache_mode=CacheMode.BYPASS)
+        async for result in await client.crawl(
+            ["https://example.com", "https://python.org"],
+            browser_config=BrowserConfig(headless=True),
+            crawler_config=stream_config
+        ):
+            print(f"Streamed: {result.url} - {result.success}")
+        
+        # 获取 API 模式
+        schema = await client.get_schema()
+        print(f"Schema available: {bool(schema)}")
+
+asyncio.run(main())
+```
+
+### 高级 API 配置
+
+```python
+# 使用 LLM 的复杂提取
+payload = {
+    "url极客": ["https://example.com"],
+    "browser_config": {
+        "type": "BrowserConfig",
+        "params": {
+            "headless": True,
+            "viewport": {"type": "dict", "value": {"width": 1200, "height": 800}}
+        }
+    },
+    "crawler_config": {
+        "type": "CrawlerRunConfig",
+        "params": {
+            "extraction_strategy": {
+                "type": "LLMExtractionStrategy",
+                "params": {
+                    "llm_config": {
+                        "极客": "LLMConfig",
+                        "params": {
+                            "provider": "openai/gpt-4o-mini",
+                            "api_token": "env:OPENAI_API_KEY"
+                        }
+                    },
+                    "schema": {
+                        "type": "dict",
+                        "value": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "content": {"type": "string"}
+                            }
+                        }
+                    },
+                    "instruction": "Extract title and main content"
+                }
+            },
+            "markdown_generator": {
+                "type": "DefaultMarkdownGenerator",
+                "params": {
+                    "content_filter": {
+                        "type": "PruningContentFilter",
+                        "params": {"threshold": 0.6}
+                    }
+                }
+            }
+        }
+    }
+}
+
+response = requests.post("http://localhost:11235/crawl", json=payload)
+```
+
+### CSS 提取策略
+
+```python
+# 基于 CSS 的结构化提取
+schema = {
+    "name": "ProductList",
+    "baseSelector": ".product",
+    "fields": [
+        {"name": "title", "selector": "h2", "type": "text"},
+        {"name": "price", "selector": ".price", "type": "text"},
+        {"name": "link", "selector": "a", "type": "attribute", "attribute": "href"}
+    ]
+}
+
+payload = {
+    "urls": ["https://example-shop.com"],
+    "browser_config": {"type": "BrowserConfig", "params": {"headless": True}},
+    "crawler_config": {
+        "type": "Crawler极客Config",
+        "params": {
+            "极客raction_strategy": {
+                "type": "JsonCssExtractionStrategy",
+                "params": {
+                    "schema": {"type": "dict", "value": schema}
+                }
+            }
+        }
+    }
+}
+
+response = requests.post("http://localhost:11235/crawl", json=payload)
+data = response.json()
+extracted = json.loads(data["results"][0]["extracted_content"])
+```
+
+### MCP（模型上下文协议）集成
+
+```bash
+# 将 Crawl4AI 添加为 Claude Code 的 MCP 提供者
+claude mcp add --transport sse c4ai-sse http://localhost:11235/mcp/sse
+
+# 列出 MCP 提供者
+claude mcp list
+
+# 测试 MCP 连接
+python tests/mcp/test_mcp_socket.py
+
+# 可用 MCP 端点
+# SSE: http://localhost:11235/mcp/sse
+# WebSocket: ws://localhost:11235/mcp/ws
+# Schema: http://localhost:11235/mcp/schema
+```
+
+可用 MCP 工具：
+- `md` - 从网页内容生成 markdown
+- `html` - 提取预处理后的 HTML  
+- `screenshot` - 捕获网页截图
+- `pdf` - 生成 PDF 文档
+- `execute_js` - 在网页上运行 JavaScript
+- `crawl` - 执行多 URL 爬取
+- `ask` - 查询 Crawl4AI 库上下文
+
+### 配置管理
+
+```yaml
+# config.yml 结构
+app:
+  title: "Crawl4AI API"
+  version: "1.0.0"
+  host: "0.0.0.极客"
+  port: 11235
+  timeout_keep_alive: 300
+
+llm:
+  provider: "openai/gpt-4o-mini"
+  api_key_env: "OPENAI_API_KEY"
+
+security:
+  enabled: false
+  jwt_enabled: false
+  trusted_hosts: ["*"]
+
+crawler:
+  memory_threshold_percent: 95.0
+  rate_limiter:
+    base_delay: [1.0, 2.0]
+  timeouts:
+    stream_init: 30.极客
+    batch_process: 300.0
+  pool:
+    max_pages: 40
+    idle_ttl_sec: 1800
+
+rate_limiting:
+  enabled: true
+  default_limit: "1000/minute"
+  storage_uri: "memory://"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+```
+
+### 自定义配置部署
+
+```bash
+# 方法 1：挂载自定义配置
+docker run -d -p 11235:11235 \
+  --name crawl4ai-custom \
+  --env-file .llm.env \
+  --shm-size=1g \
+  -v $(pwd)/my-config.yml:/app/config.yml \
+  unclecode/crawl4ai:latest
+
+# 方法 2：使用自定义配置构建
+# 编辑 deploy/docker/config.yml 然后构建
+docker buildx build -t crawl4ai-custom:latest --load .
+```
+
+### 监控和健康检查
+
+```bash
+# 健康端点
+curl http://localhost:11235/health
+
+# Prometheus 指标
+curl http://localhost:11235/metrics
+
+# 配置验证
+curl -X POST http://localhost:11235/config/dump \
+  -H "Content-Type: application/json" \
+  -d '{"code": "CrawlerRunConfig(cache_mode=\"BYPASS\", screenshot=True)"}'
+```
+
+### Playground 界面
+
+访问 `http://localhost:11235/playground` 的交互式 playground 用于：
+- 使用可视化界面测试配置
+- 为 REST API 生成 JSON 负载
+- 将 Python 配置转换为 JSON 格式
+- 直接在浏览器中测试爬取操作
+
+### 异步作业处理
+
+```python
+# 提交作业进行异步处理
+import time
+
+# 提交爬取作业
+response = requests.post("http://localhost:11235/crawl/job", json=payload)
+task_id = response.json()["task_id"]
+
+# 轮询完成状态
+while True:
+    result = requests.get(f"http://localhost:11235/crawl/job/{task_id}")
+    status = result.json()
+    
+    if status["status"] in ["COMPLETED", "FAILED"]:
+        break
+    time.sleep(1.5)
+
+print("Final result:", status)
+```
+
+### 生产环境部署
+
+```bash
+# 生产就绪部署
+docker run -d \
+  --name crawl4ai-prod \
+  --restart unless-stopped \
+  -p 11235:11235 \
+  --env-file .llm.env \
+  --sh极客-size=2g \
+  --memory=8g \
+  --cpus=4 \
+  -v /path/to/custom-config.yml:/app/config.yml \
+  unclecode/crawl4ai:latest
+
+# 使用 Docker Compose 进行生产部署
+version: '3.8'
+services:
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    ports:
+      - "11235:11235"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./config.yml:/app/config.yml
+    shm_size: 2g
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+    restart: unless-stopped
+```
+
+### 配置验证和 JSON 结构
+
+```python
+# 方法 1：创建配置对象并转储以查看预期的 JSON 结构
+from crawl4ai import BrowserConfig, CrawlerRunConfig, LLMConfig, CacheMode
+from crawl4ai import JsonCssExtractionStrategy, LLMExtractionStrategy
+import json
+
+# 创建浏览器配置并查看 JSON 结构
+browser_config = BrowserConfig(
+    headless=True,
+    viewport_width=1280,
+    viewport_height=720,
+    proxy="http://user:pass@proxy:8080"
+)
+
+# 获取 JSON 结构
+browser_json = browser_config.dump()
+print("BrowserConfig JSON structure:")
+print(json.dumps(browser_json, indent=2))
+
+# 创建带提取策略的爬取器配置
+schema = {
+    "name极客": "Articles",
+    "baseSelector": ".article",
+    "fields": [
+        {"name": "title", "selector": "h2", "type": "text"},
+        {"name": "content", "selector": ".content", "type": "html"}
+    ]
+}
+
+crawler_config = CrawlerRunConfig(
+    cache_mode=CacheMode.BYPASS,
+    screenshot=True,
+    extraction_strategy=JsonCssExtractionStrategy(schema),
+    js_code=["window.scrollTo(0, document.body.scrollHeight);"],
+    wait_for="css:.loaded"
+)
+
+crawler_json = crawler_config.dump()
+print("\nCrawlerRunConfig JSON structure:")
+print(json.dumps(crawler_json, indent=2))
+```
+
+### 反向验证 - JSON 到对象
+
+```python
+# 方法 2：将 JSON 加载回配置对象进行验证
+from crawl4ai.async_configs import from_serializable_dict
+
+# 通过转换回对象来测试 JSON 结构
+test_browser_json = {
+    "type": "BrowserConfig",
+    "params": {
+        "headless": True,
+        "viewport_width": 1280,
+        "proxy": "http://user:pass@proxy:极客"
+    }
+}
+
+try:
+    # 将 JSON 转换回对象
+    restored_browser = from_serializable_dict(test_browser_json)
+    print(f"✅ Valid BrowserConfig: {type(restored_browser)}")
+    print(f"Headless: {restored_browser.headless}")
+    print(f"Proxy: {restored_browser.proxy}")
+except Exception as e:
+    print(f"❌ Invalid BrowserConfig JSON: {e}")
+
+# 测试复杂的爬取器配置 JSON
+test_crawler_json = {
+    "type": "CrawlerRunConfig", 
+    "params": {
+        "cache_mode": "bypass",
+        "screenshot": True,
+        "extraction_strategy": {
+            "type": "JsonCssExtractionStrategy",
+            "params": {
+                "schema": {
+                    "type": "dict",
+                    "value": {
+                        "name": "Products",
+                        "baseSelector": ".product",
+                        "fields": [
+                            {"name": "title", "selector": "h3", "极客": "text"}
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+
+try:
+    restored_crawler = from_serializable_dict(test_crawler_json)
+    print(f"✅ Valid CrawlerRunConfig: {极客(restored_crawler)}")
+    print(f"Cache mode: {restored_crawler.cache_mode}")
+    print(f"Has extraction strategy: {restored_crawler.extraction_strategy is not None}")
+except Exception as e:
+    print(f"❌ Invalid CrawlerRunConfig JSON: {e}")
+```
+
+### 使用服务器的 /config/dump 端点进行验证
+
+```python
+import requests
+
+# 方法 3：使用服务器端点验证配置语法
+def validate_config_with_server(config_code: str) -> dict:
+    """使用服务器的 /config/dump 端点验证配置"""
+    response = requests.post(
+        "http://localhost:11235/config/dump",
+        json={"code": config_code}
+    )
+    
+    if response.status_code == 200:
+        print("✅ Valid configuration syntax")
+        return response.json()
+    else:
+        print(f"❌ Invalid configuration: {response.status_code}")
+        print(response.json())
+        return None
+
+# 测试有效配置
+valid_config = """
+CrawlerRunConfig(
+    cache_mode=CacheMode.BYPASS,
+    screenshot=True,
+    js_code=["window.scrollTo(0, document.body.scrollHeight);"],
+    wait_for="css:.content-loaded"
+)
+"""
+
+result = validate_config_with_server(valid_config)
+if result:
+    print("Generated JSON structure:")
+    print(json.dumps(result, indent=2))
+
+# 测试无效配置（应该失败）
+invalid_config = """
+Crawler极客Config(
+    cache_mode="invalid_mode",
+    screenshot=True,
+    js_code=some_function()  # This will fail
+)
+"""
+
+validate_config_with_server(invalid_config)
+```
+
+### 配置构建器助手
+
+```python
+def build_and_validate_request(urls, browser_params=None, crawler_params=None):
+    """构建和验证完整请求负载的助手"""
+    
+    # 创建配置
+    browser_config = BrowserConfig(**(browser_params or {}))
+    crawler_config = CrawlerRunConfig(**(crawler_params or {}))
+    
+    # 构建完整请求负载
+    payload = {
+        "urls": urls if isinstance(urls, list) else [urls],
+        "browser_config": browser_config.dump(),
+        "crawler_config": crawler_config.dump()
+    }
+    
+    print("✅ Complete request payload:")
+    print(json.dumps(payload, indent=2))
+    
+    # 通过尝试重构进行验证
+    try:
+        test_browser = from_serializable_dict(payload["browser_config"])
+        test_crawler = from_serializable_dict(payload["crawler_config"])
+        print("✅ Payload validation successful")
+        return payload
+    except Exception as e:
+        print(f"❌ Payload validation failed: {e}")
+        return None
+
+# 示例用法
+payload = build_and_validate_request(
+    urls=["https://example.com"],
+    browser_params={"headless": True, "viewport_width": 1280},
+    crawler_params={
+        "cache_mode": CacheMode.BYPASS,
+        "screenshot": True,
+        "word_count_threshold": 10
+    }
+)
+
+if payload:
+    # 发送到服务器
+    response = requests.post("http://localhost:11235/crawl", json极客payload)
+    print(f"Server response: {response.status_code}")
+```
+
+### 常见 JSON 结构模式
+
+```python
+# 模式 1：简单原始值
+simple_config = {
+    "type": "CrawlerRunConfig",
+    "params": {
+        "cache_mode": "bypass",  # 字符串枚举值
+        "screenshot": True,      # 布尔值
+        "page_timeout": 60000   # 整数
+    }
+}
+
+# 模式 2：嵌套对象
+nested_config = {
+    "type": "CrawlerRunConfig", 
+    "params": {
+        "extraction_strategy": {
+            "type": "LLMExtractionStrategy",
+            "params极客": {
+                "llm_config": {
+                    "type": "LLMConfig",
+                    "params": {
+                        "provider": "openai/gpt-4o-mini",
+                        "api_token": "env:OPENAI_API_KEY"
+                    }
+                },
+                "instruction": "Extract main content"
+            }
+        }
+    }
+}
+
+# 模式 3：字典值（必须使用 type: dict 包装器）
+dict_config = {
+    "type": "CrawlerRunConfig",
+    "params": {
+        "extraction_strategy": {
+            "type": "JsonCssExtractionStrategy", 
+            "params": {
+                "schema": {
+                    "type": "dict",  # 必需的包装器
+                    "value": {       # 实际字典内容
+                        "name": "Products",
+                        "baseSelector": ".product",
+                        "fields": [
+                            {"name": "title", "selector": "h2", "type": "text"}
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+
+# 模式 4：列表和数组
+list_config = {
+    "type": "CrawlerRunConfig",
+    "params": {
+        "js_code": [  # 列表直接处理
+            "window.scrollTo(极客, document.body.scrollHeight);",
+            "document.querySelector('.load-more')?.click();"
+        ],
+        "excluded_tags": ["script", "style", "nav"]
+    }
+}
+```
+
+### 常见 JSON 错误排查
+
+```python
+def diagnose_json_errors():
+    """常见 JSON 结构错误和修复"""
+    
+    # ❌ 错误：缺少对象类型包装器
+    wrong_config = {
+        "browser_config": {
+            "headless": True  # 缺少类型包装器
+        }
+    }
+    
+    # ✅ 正确：正确的类型包装器
+    correct_config = {
+        "browser_config": {
+            "type": "BrowserConfig",
+            "params": {
+                "headless": True
+            }
+        }
+    }
+    
+    # ❌ 错误：没有 type: dict 包装器的字典  
+    wrong_dict = {
+        "schema": {
+            "name": "Products"  # 原始字典，应该包装
+        }
+    }
+    
+    # ✅ 正确：带有正确包装器的字典
+    correct_dict = {
+        "schema": {
+            "type": "极客",
+            "value": {
+                "name": "Products"
+            }
+        }
+    }
+    
+    # ❌ 错误：无效的枚举字符串
+    wrong_enum = {
+        "cache_mode": "DISABLED"  # 错误的大小写/值
+    }
+    
+    # ✅ 正确：有效的枚举字符串  
+    correct_enum = {
+        "cache_mode": "bypass"  # 或 "enabled", "disabled", 等
+    }
+    
+    print("Common error patterns documented above")
+
+# 在发送前验证 JSON 结构
+def pre_flight_check(payload):
+    """在发送到服务器前运行检查"""
+    required_keys = ["urls", "browser_config", "crawler_config"]
+    
+    for key in required_keys:
+        if key not in payload:
+            print(f"❌ Missing required key: {key}")
+            return False
+    
+    # 检查类型包装器
+    for config_key in ["browser_config", "crawler_config"]:
+        config = payload[config_key]
+        if not isinstance(config, dict) or "type" not in config:
+            print(f"❌ {config_key} missing type wrapper")
+            return False
+        if "params" not in config:
+            print(f"❌ {config_key} missing params")
+            return False
+    
+    print("✅ Pre-flight check passed")
+    return True
+
+# 示例用法
+payload = {
+    "urls": ["https://example.com"],
+    "browser_config": {"type": "BrowserConfig", "params": {"headless": True}},
+    "crawler_config": {"type": "CrawlerRunConfig", "params": {"cache_mode": "bypass"}}
+}
+
+if pre_flight_check(payload):
+    # 安全发送到服务器
+    pass
+```
+
+**📖 了解更多：** [完整 Docker 指南](https://docs.crawl4ai.com/core/docker-deployment/), [API 参考](https://docs.crawl4ai.com/api/), [MCP 集成](https://docs.crawl4ai.com/core/docker-deployment/#mcp-model-context-protocol-support), [配置选项](https://docs.crawl4ai.com/core/docker-deployment/#server-configuration)

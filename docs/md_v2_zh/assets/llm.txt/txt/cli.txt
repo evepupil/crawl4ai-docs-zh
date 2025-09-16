@@ -1,0 +1,295 @@
+## CLI 与基于身份特征的浏览
+
+用于网络爬取的命令行界面，支持持久化浏览器配置文件、身份验证与身份管理。
+
+### 基础 CLI 用法
+
+```bash
+# 简单爬取
+crwl https://example.com
+
+# 获取 Markdown 格式输出
+crwl https://example.com -o markdown
+
+# 绕过缓存的 JSON 输出
+crwl https://example.com -o json --bypass-cache
+
+# 使用特定浏览器设置的详细模式
+crwl https://example.com -b "headless=false,viewport_width=1280" -v
+```
+
+### 配置文件管理命令
+
+```bash
+# 启动交互式配置文件管理器
+crwl profiles
+
+# 创建、列出和管理浏览器配置文件
+# 这将打开一个菜单，您可以：
+# 1. 列出已有配置文件
+# 2. 创建新配置文件（打开浏览器进行设置）
+# 3. 删除配置文件
+# 4. 使用配置文件爬取网站
+
+# 使用特定配置文件进行爬取
+crwl https://example.com -p my-profile-name
+
+# 需要身份验证网站的工作流示例：
+# 1. 创建配置文件并登录
+crwl profiles  # 选择“创建新配置文件”
+# 2. 使用配置文件爬取需验证内容
+crwl https://site-requiring-login.com/dashboard -p my-profile-name
+```
+
+### CDP 浏览器管理
+
+```bash
+# 启动支持 CDP 调试的浏览器（默认端口 9222）
+crwl cdp
+
+# 使用特定配置文件和自定义端口
+crwl cdp -p my-profile -P 9223
+
+# 启动支持 CDP 的无头浏览器
+crwl cdp --headless
+
+# 启动隐身模式（忽略配置文件）
+crwl cdp --incognito
+
+# 使用自定义用户数据目录
+crwl cdp --user-data-dir ~/my-browser-data --port 9224
+```
+
+### 内置浏览器管理
+
+```bash
+# 启动持久化浏览器实例
+crwl browser start
+
+# 检查浏览器状态
+crwl browser status
+
+# 打开可见窗口查看浏览器
+crwl browser view --url https://example.com
+
+# 停止浏览器
+crwl browser stop
+
+# 使用不同选项重启
+crwl browser restart --browser-type chromium --port 9223 --no-headless
+
+# 在爬取中使用内置浏览器
+crwl https://example.com -b "browser_mode=builtin"
+```
+
+### 身份验证工作流示例
+
+```bash
+# LinkedIn 数据抓取的完整工作流
+# 1. 创建已认证配置文件
+crwl profiles
+# 选择“创建新配置文件” → 在浏览器中登录 LinkedIn → 按 'q' 保存
+
+# 2. 使用配置文件进行爬取
+crwl https://linkedin.com/in/someone -p linkedin-profile -o markdown
+
+# 3. 通过身份验证提取结构化数据
+crwl https://linkedin.com/search/results/people/ \
+    -p linkedin-profile \
+    -j "提取包含姓名、职位和公司的人员档案" \
+    -b "headless=false"
+
+# GitHub 认证爬取
+crwl profiles  # 创建 github-profile
+crwl https://github.com/settings/profile -p github-profile
+
+# Twitter/X 认证访问
+crwl profiles  # 创建 twitter-profile  
+crwl https://twitter.com/home -p twitter-profile -o markdown
+```
+
+### 高级 CLI 配置
+
+```bash
+# 多配置文件的复杂爬取
+crwl https://example.com \
+    -B browser.yml \
+    -C crawler.yml \
+    -e extract_llm.yml \
+    -s llm_schema.json \
+    -p my-auth-profile \
+    -o json \
+    -v
+
+# 通过身份验证的快速 LLM 提取
+crwl https://private-site.com/dashboard \
+    -p auth-profile \
+    -j "提取用户仪表板数据，包括指标和通知" \
+    -b "headless=true,viewport_width=1920"
+
+# 带身份验证的内容过滤
+crwl https://members-only-site.com \
+    -p member-profile \
+    -f filter_bm25.yml \
+    -c "css_selector=.member-content,scan_full_page=true" \
+    -o markdown-fit
+```
+
+### 基于身份特征浏览的配置文件
+
+```yaml
+# browser_auth.yml
+headless: false
+use_managed_browser: true
+user_data_dir: "/path/to/profile"
+viewport_width: 1280
+viewport_height: 720
+simulate_user: true
+override_navigator: true
+
+# crawler_auth.yml  
+magic: true
+remove_overlay_elements: true
+simulate_user: true
+wait_for: "css:.authenticated-content"
+page_timeout: 60000
+delay_before_return_html: 2
+scan_full_page: true
+```
+
+### 全局配置管理
+
+```bash
+# 列出所有配置设置
+crwl config list
+
+# 设置默认 LLM 提供商
+crwl config set DEFAULT_LLM_PROVIDER "anthropic/claude-3-sonnet"
+crwl config set DEFAULT_LLM_PROVIDER_TOKEN "your-api-token"
+
+# 设置浏览器默认值
+crwl config set BROWSER_HEADLESS false  # 始终显示浏览器
+crwl config set USER_AGENT_MODE random  # 随机用户代理
+
+# 全局启用详细模式
+crwl config set VERBOSE true
+```
+
+### 关于认证内容的问答
+
+```bash
+# 询问关于认证内容的问题
+crwl https://private-dashboard.com -p dashboard-profile \
+    -q "我的仪表板中显示了哪些关键指标？"
+
+# 多问题工作流
+crwl https://company-intranet.com -p work-profile -o markdown  # 查看内容
+crwl https://company-intranet.com -p work-profile \
+    -q "总结本周的公告"
+crwl https://company-intranet.com -p work-profile \
+    -q "有哪些即将到来的截止日期？"
+```
+
+### 通过编程方式创建配置文件
+
+```python
+# 通过 Python API 创建配置文件
+import asyncio
+from crawl4ai import BrowserProfiler
+
+async def create_auth_profile():
+    profiler = BrowserProfiler()
+    
+    # 交互式创建配置文件（打开浏览器）
+    profile_path = await profiler.create_profile("linkedin-auth")
+    print(f"配置文件创建于: {profile_path}")
+    
+    # 列出所有配置文件
+    profiles = profiler.list_profiles()
+    for profile in profiles:
+        print(f"配置文件: {profile['name']} 位于 {profile['path']}")
+    
+    # 使用配置文件进行爬取
+    from crawl4ai import AsyncWebCrawler, BrowserConfig
+    
+    browser_config = BrowserConfig(
+        headless=True,
+        use_managed_browser=True,
+        user_data_dir=profile_path
+    )
+    
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        result = await crawler.arun("https://linkedin.com/feed")
+        return result
+
+# asyncio.run(create_auth_profile())
+```
+
+### 基于身份特征浏览的最佳实践
+
+```bash
+# 1. 为不同网站创建特定配置文件
+crwl profiles  # 创建 "linkedin-work"
+crwl profiles  # 创建 "github-personal" 
+crwl profiles  # 创建 "company-intranet"
+
+# 2. 使用描述性配置文件名称
+crwl https://site1.com -p site1-admin-account
+crwl https://site2.com -p site2-user-account
+
+# 3. 结合适当的浏览器设置
+crwl https://secure-site.com \
+    -p secure-profile \
+    -b "headless=false,simulate_user=true,magic=true" \
+    -c "wait_for=.logged-in-indicator,page_timeout=30000"
+
+# 4. 自动化爬取前测试配置文件
+crwl cdp -p test-profile  # 手动验证登录状态
+crwl https://test-url.com -p test-profile -v  # 详细测试爬取
+```
+
+### 身份验证问题排查
+
+```bash
+# 调试身份验证问题
+crwl https://auth-site.com -p auth-profile \
+    -b "headless=false,verbose=true" \
+    -c "verbose=true,page_timeout=60000" \
+    -v
+
+# 检查配置文件状态
+crwl profiles  # 列出配置文件并检查创建日期
+
+# 重新创建有问题的配置文件
+crwl profiles  # 删除旧配置文件，创建新配置文件
+
+# 使用可见浏览器测试
+crwl https://problem-site.com -p profile-name \
+    -b "headless=false" \
+    -c "delay_before_return_html=5"
+```
+
+### 常见用例
+
+```bash
+# 社交媒体监控（认证后）
+crwl https://twitter.com/home -p twitter-monitor \
+    -j "提取最新推文，包含情感和互动指标"
+
+# 电商竞品分析（需账户访问权限）
+crwl https://competitor-site.com/products -p competitor-account \
+    -j "提取产品价格、可用性和描述"
+
+# 公司仪表板监控
+crwl https://company-dashboard.com -p work-profile \
+    -c "css_selector=.dashboard-content" \
+    -q "有哪些需要关注的警报或通知？"
+
+# 研究数据收集（需认证访问）
+crwl https://research-platform.com/data -p research-profile \
+    -e extract_research.yml \
+    -s research_schema.json \
+    -o json
+```
+
+**📖 了解更多:** [基于身份特征的爬取文档](https://docs.crawl4ai.com/advanced/identity-based-crawling/), [浏览器配置文件管理](https://docs.crawl4ai.com/advanced/session-management/), [CLI 示例](https://docs.crawl4ai.com/core/cli/)

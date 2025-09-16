@@ -1,0 +1,602 @@
+## Docker 部署架构与工作流
+
+Crawl4AI Docker 部署、API 架构、配置管理和服务交互的可视化呈现。
+
+### Docker 部署决策流程
+
+```mermaid
+flowchart TD
+    A[开始 Docker 部署] --> B{部署类型？}
+    
+    B -->|快速开始| C[预构建镜像]
+    B -->|开发| D[Docker Compose]
+    B -->|自定义构建| E[手动构建]
+    B -->|生产环境| F[生产环境设置]
+    
+    C --> C1[docker pull unclecode/crawl4ai]
+    C1 --> C2{需要 LLM 支持？}
+    C2 -->|是| C3[设置 .llm.env]
+    C2 -->|否| C4[基础运行]
+    C3 --> C5[docker run 使用 --env-file]
+    C4 --> C6[docker run 基础命令]
+    
+    D --> D1[git clone 仓库]
+    D1 --> D2[cp .llm.env.example .llm.env]
+    D2 --> D3{构建类型？}
+    D3 -->|预构建| D4[IMAGE=latest docker compose up]
+    D3 -->|本地构建| D5[docker compose up --build]
+    D3 -->|全功能| D6[INSTALL_TYPE=all docker compose up]
+    
+    E --> E1[docker buildx build]
+    E1 --> E2{架构？}
+    E2 -->|单架构| E3[--platform linux/amd64]
+    E2 -->|多架构| E4[--platform linux/amd64,linux/arm64]
+    E3 --> E5[构建完成]
+    E4 --> E5
+    
+    F --> F1[生产环境配置]
+    F1 --> F2[自定义 config.yml]
+    F2 --> F3[资源限制]
+    F3 --> F4[健康监控]
+    F4 --> F5[生产环境就绪]
+    
+    C5 --> G[服务运行于 :11235]
+    C6 --> G
+    D4 --> G
+    D5 --> G
+    D6 --> G
+    E5 --> H[docker run 自定义镜像]
+    H --> G
+    F5 --> I[生产环境部署]
+    
+    G --> J[访问 /playground 游乐场]
+    G --> K[健康检查 /health]
+    I --> L[生产环境监控]
+    
+    style A fill:#e1f5fe
+    style G fill:#c8e6c9
+    style I fill:#c8e6c9
+    style J fill:#fff3e0
+    style K fill:#fff3e0
+    style L fill:#e8f5e8
+```
+
+### Docker 容器架构
+
+```mermaid
+graph TB
+    subgraph "主机环境"
+        A[Docker 引擎] --> B[Crawl4AI 容器]
+        C[.llm.env] --> B
+        D[自定义 config.yml] --> B
+        E[端口 11235] --> B
+        F[共享内存 1GB+] --> B
+    end
+    
+    subgraph "容器服务"
+        B --> G[FastAPI 服务器 :8020]
+        B --> H[Gunicorn WSGI]
+        B --> I[Supervisord 进程管理器]
+        B --> J[Redis 缓存 :6379]
+        
+        G --> K[REST API 端点]
+        G --> L[WebSocket 连接]
+        G --> M[MCP 协议]
+        
+        H --> N[工作进程]
+        I --> O[服务监控]
+        J --> P[请求缓存]
+    end
+    
+    subgraph "浏览器管理"
+        B --> Q[Playwright 框架]
+        Q --> R[Chromium 浏览器]
+        Q --> S[Firefox 浏览器]
+        Q --> T[WebKit 浏览器]
+        
+        R --> U[浏览器池]
+        S --> U
+        T --> U
+        
+        U --> V[页面会话]
+        U --> W[上下文管理]
+    end
+    
+    subgraph "外部服务"
+        X[OpenAI API] -.-> K
+        Y[Anthropic Claude] -.-> K
+        Z[本地 Ollama] -.-> K
+        AA[Groq API] -.-> K
+        BB[Google Gemini] -.-> K
+    end
+    
+    subgraph "客户端交互"
+        CC[Python SDK] --> K
+        DD[REST API 调用] --> K
+        EE[MCP 客户端] --> M
+        FF[Web 浏览器] --> G
+        GG[监控工具] --> K
+    end
+    
+    style B fill:#e3f2fd
+    style G fill:#f3e5f5
+    style Q fill:#e8f5e8
+    style极 fill:#fff3e0
+```
+
+### API 端点架构
+
+```mermaid
+graph LR
+    subgraph "核心端点"
+        A[/crawl] --> A1[单 URL 爬取]
+        A2[/crawl/stream] --> A3[流式多 URL]
+       极[/crawl/job] --> A5[异步作业提交]
+        A6[/crawl/job/{id}] --> A7[作业状态检查]
+    end
+    
+    subgraph "专用端点"
+        B[/html] --> B1[预处理 HTML]
+        B2[/screenshot] --> B3[PNG 截图]
+        B4[/pdf] --> B5[PDF 生成]
+        B6[/execute_js] --> B7[JavaScript 执行]
+        B8[/md] --> B9[Markdown 提取]
+    end
+    
+    subgraph "实用端点"
+        C[/health] --> C1[服务状态]
+        C2[/metrics] --> C3[Prometheus 指标]
+        C4[/schema] --> C5[API 文档]
+        C6[/playground] --> C7[交互式测试]
+    end
+    
+    subgraph "LLM 集成"
+        D[/llm/{url}] --> D1[基于 URL 的问答]
+        D2[/ask] --> D3[库上下文搜索]
+        D4[/config/dump] --> D5[配置验证]
+   极
+    
+    subgraph "MCP 协议"
+        E[/mcp/sse] --> E1[服务器发送事件]
+        E2[/mcp/ws] --> E3[WebSocket 连接]
+        E4[/mcp/schema] --> E5[MCP 工具定义]
+    end
+    
+    style A fill:#e3f2fd
+    style B fill:#f极e5f5
+    style C fill:#e8f5e8
+    style D fill:#fff3e0
+    style E fill:#fce4ec
+```
+
+### 请求处理流程
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI
+    participant RequestValidator
+    participant BrowserPool
+    participant Playwright
+    participant ExtractionEngine
+    participant LLMProvider
+    
+    Client->>FastAPI: POST /crawl 附带配置
+    FastAPI->>RequestValidator: 验证 JSON 结构
+    
+    alt 有效请求
+        RequestValidator-->>FastAPI: ✓ 验证通过
+        FastAPI->>BrowserPool: 请求浏览器实例
+        BrowserPool->>Playwright: 启动浏览器/复用会话
+        Playwright-->>Browser极: 浏览器就绪
+        BrowserPool-->>FastAPI: 浏览器已分配
+        
+        FastAPI->>Playwright: 导航至 URL
+        Playwright->>Playwright: 执行 JS，等待条件
+        Playwright-->>FastAPI: 页面内容就绪
+        
+        FastAPI->>ExtractionEngine: 处理内容
+        
+        alt LLM 提取
+            ExtractionEngine->>LLMProvider: 发送内容 + 模式
+            LLMProvider-->>ExtractionEngine: 结构化数据
+        else CSS 提取
+            ExtractionEngine->>ExtractionEngine: 应用 CSS 选择器
+        end
+        
+        ExtractionEngine-->>FastAPI: 提取完成
+        FastAPI->>BrowserPool: 释放浏览器
+        FastAPI-->>Client: CrawlResult 响应
+        
+    else 无效请求
+        RequestValidator-->>FastAPI: ✗ 验证错误
+        FastAPI-->>Client: 400 错误请求
+    end
+```
+
+### 配置管理流程
+
+```mermaid
+stateDiagram-v2
+    [*] --> ConfigLoading
+    
+    ConfigLoading --> DefaultConfig: 加载默认 config.yml
+    ConfigLoading --> CustomConfig: 挂载自定义配置
+    ConfigLoading --> EnvOverrides: 环境变量
+    
+    DefaultConfig --> ConfigMerging
+    CustomConfig --> ConfigMerging
+    EnvOverrides --> ConfigMerging
+    
+    ConfigMerging --> ConfigValidation
+    
+    ConfigValidation --> Valid: 模式验证通过
+    ConfigValidation --> Invalid: 验证错误
+    
+    Invalid --> ConfigError: 记录错误并退出
+    ConfigError --> [*]
+    
+    Valid --> ServiceInitialization
+    ServiceInitialization --> FastAPISetup
+    ServiceInitialization --> BrowserPoolInit
+    ServiceInitialization --> CacheSetup
+    
+    FastAPIS极 --> Running
+    BrowserPoolInit --> Running
+    CacheSetup --> Running
+    
+    Running --> ConfigReload: 检测到配置更改
+    ConfigReload --> ConfigValidation
+    
+    Running --> [*]: 服务关闭
+    
+    note right of ConfigMerging : 优先级: ENV > 自定义 > 默认
+    note right of ServiceInitialization : 所有服务必须成功初始化
+```
+
+### 多架构构建流程
+
+```mermaid
+flowchart TD
+    A[开发者推送] --> B[GitHub 仓库]
+    
+    B --> C[Docker Buildx]
+    C --> D{构建策略}
+    
+    D -->|多架构| E[并行构建]
+    D -->|单架构| F[平台特定构建]
+    
+    E --> G[AMD64 构建]
+    E --> H[ARM64 构建]
+    
+    F --> I[目标平台构建]
+    
+    subgraph "AMD64 构建流程"
+        G --> G1[Ubuntu 基础镜像]
+        G1 --> G2[安装 Python 3.11]
+        G2 --> G3[系统依赖]
+        G3 --> G4[安装 Crawl4AI]
+        G4 --> G5[Playwright 设置]
+        G5 --> G6[FastAPI 配置]
+        G6 --> G7[AMD64 镜像就绪]
+    end
+    
+    subgraph "ARM64 构建流程"
+        H --> H1[Ubuntu ARM64 基础]
+        H1 --> H2[安装 Python 3.11]
+        H2 --> H3[ARM 特定依赖]
+        H3 --> H4[安装 Crawl4AI]
+        H4 --> H5[Playwright 设置]
+        H5 --> H6[FastAPI 配置]
+        H6 --> H7[ARM64 镜像就绪]
+    end
+    
+    subgraph "单架构"
+        I --> I1[基础镜像选择]
+        I1 --> I2[平台依赖]
+        I2 --> I3[应用设置]
+        I3 --> I4[平台镜像就绪]
+    end
+    
+    G7 --> J[多架构清单]
+    H7 --> J
+    I4 --> K[平台镜像]
+    
+    J --> L[Docker Hub 注册表]
+    K --> L
+    
+    L --> M[拉取请求自动选择架构]
+    
+    style A fill:#e1f5fe
+    style J fill:#c8e6c9
+    style K fill:#c8e6c9
+    style L fill:#f3e5f5
+    style M fill:#e8f5e8
+```
+
+### MCP 集成架构
+
+```mermaid
+graph TB
+    subgraph "MCP 客户端应用"
+        A[Claude Code] --> B[MCP 协议]
+        C[Cursor IDE] --> B
+        D[Windsurf] --> B
+        E[自定义 MCP 客户端] -->极
+    
+    subgraph "Crawl4AI MCP 服务器"
+        B --> F[MCP 端点路由器]
+        F --> G[SSE 传输 /mcp/sse]
+        F --> H[WebSocket 传输 /mcp/ws]
+        F --> I[模式端点 /mcp/schema]
+        
+        G --> J[MCP 工具处理器]
+        H --> J
+        
+        J --> K[工具: md]
+        J --> L[工具: html]
+        J --> M[工具: screenshot]
+        J --> N[工具: pdf]
+        J --> O[工具: execute_js]
+        J --> P[极: crawl]
+        J --> Q[工具: ask]
+    end
+    
+    subgraph "Crawl4AI 核心服务"
+        K --> R[Markdown 生成器]
+        L --> S[HTML 预处理器]
+        M --> T[截图服务]
+        N --> U[PDF 生成器]
+        O --> V[JavaScript 执行器]
+        P --> W[批量爬虫]
+        Q --> X[上下文搜索]
+        
+        R --> Y[浏览器池]
+        S --> Y
+        T --> Y
+        U --> Y
+        V --> Y
+        W --> Y
+        X --> Z[知识库]
+    end
+    
+    subgraph "外部资源"
+        Y --> AA[Playwright 浏览器]
+        Z --> BB[库文档]
+        Z --> CC[代码示例]
+        AA --> DD[网页]
+    end
+    
+    style B fill:#e3f2fd
+    style J fill:#f3e5f5
+    style Y fill:#e8f5e8
+    style Z fill:#fff3e0
+```
+
+### API 请求/响应流模式
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant LoadBalancer
+    participant FastAPI
+    participant ConfigValidator
+    participant BrowserManager
+    participant CrawlEngine
+    participant ResponseBuilder
+    
+    Note over Client,ResponseBuilder: 基本爬取请求
+    
+    Client->>LoadBalancer: POST /crawl
+    LoadBalancer->>FastAPI: 路由请求
+    
+    FastAPI->>ConfigValidator: 验证 browser_config
+    ConfigValidator-->>FastAPI: ✓ 有效 BrowserConfig
+    
+    FastAPI->>ConfigValidator: 验证 crawler_config
+    ConfigValidator-->>FastAPI: ✓ 有效 CrawlerRunConfig
+    
+    FastAPI->>BrowserManager: 分配浏览器
+    BrowserManager-->>FastAPI: 浏览器实例
+    
+    FastAPI->>CrawlEngine: 执行爬取
+    
+    Note over CrawlEngine: 页面处理
+    CrawlEngine->>CrawlEngine: 导航与等待
+    CrawlEngine->>CrawlEngine: 提取内容
+    CrawlEngine->>CrawlEngine: 应用策略
+    
+    CrawlEngine-->>FastAPI: CrawlResult
+    
+    FastAPI->>ResponseBuilder: 格式化响应
+    ResponseBuilder-->>FastAPI: JSON 响应
+    
+    FastAPI->极rowserManager: 释放浏览器
+    FastAPI-->>LoadBalancer: 响应就绪
+    LoadBalancer-->>Client: 200 OK + CrawlResult
+    
+    Note over Client,ResponseBuilder: 流式请求
+    
+    Client->>FastAPI: POST /crawl/stream
+    FastAPI-->>Client: 200 OK (流开始)
+    
+    loop 对于每个 URL
+        FastAPI->>CrawlEngine: 处理 URL
+        CrawlEngine-->>FastAPI: 结果就绪
+        FastAPI-->>Client: NDJSON 行
+    end
+    
+    FastAPI-->>Client: 流完成
+```
+
+### 配置验证工作流
+
+```mermaid
+flowchart TD
+    A[客户端请求] --> B[JSON 负载]
+    B --> C{预验证}
+    
+    C -->|✓ 有效 JSON| D[提取配置]
+    C -->|✗ 无效 JSON| E[返回 400 错误请求]
+    
+    D --> F[BrowserConfig 验证]
+    D --> G[CrawlerRunConfig 验证]
+    
+    F --> H{BrowserConfig 有效？}
+    G --> I{CrawlerRunConfig 有效？}
+    
+    H -->|✓ 有效| J[浏览器设置]
+    H -->|✗ 无效| K[记录浏览器配置错误]
+    
+    I -->|✓ 有效| L[爬虫设置]
+    I -->|✗ 无效| M[记录爬虫配置错误]
+    
+    K --> N[收集所有错误]
+    M --> N
+    N --> O[返回 422 验证错误]
+    
+    J --> P{两个配置都有效？}
+    L --> P
+    
+    P -->|✓ 是| Q[继续到爬取]
+    P -->|✗ 否| O
+    
+    Q --> R[执行爬取管道]
+    R --> S[返回 CrawlResult]
+    
+    E --> T[客户端错误响应]
+    O --> T
+    S --> U[客户端成功响应]
+    
+    style A fill:#e1f5fe
+    style Q fill:#c8e6c9
+    style S fill:#c8e6c9
+    style U fill:#c8e6c9
+    style E fill:#ffcdd2
+    style O fill:#ffcdd2
+    style T fill:#ffcdd2
+```
+
+### 生产环境部署架构
+
+```mermaid
+graph TB
+    subgraph "负载均衡层"
+        A[NGINX/HAProxy] --> B[健康检查]
+        A --> C[请求路由]
+        A --> D[SSL 终止]
+    end
+    
+    subgraph "应用层"
+        C --> E[Crawl4AI 实例 1]
+        C --> F[Crawl4AI 实例 2]
+        C --> G[Crawl4AI 实例 N]
+        
+        E --> H[FastAPI 服务器]
+        F --> I[FastAPI 服务器]
+        G --> J[FastAPI 服务器]
+        
+        H --> K[浏览器池 1]
+        I --> L[浏览器池 2]
+        J --> M[浏览器池 N]
+    end
+    
+    subgraph "共享服务"
+        N[Redis 集群] --> E
+        N --> F
+        N --> G
+        
+        O[监控栈] --> P[Prometheus]
+        O --> Q[Grafana]
+        O --> R[AlertManager]
+        
+        P --> E
+        P --> F
+        P --> G
+    end
+    
+    subgraph "外部依赖"
+        S[OpenAI API] -.-> H
+        T[Anthropic API] -.-> I
+        U[本地 LLM 集群] -.-> J
+    end
+    
+    subgraph "持久存储"
+        V[配置卷] --> E
+        V --> F
+        V --> G
+        
+        W[缓存卷] --> N
+        X[日志卷] --> O
+    end
+    
+    style A fill:#e3f2fd
+    style E fill:#f3e5f5
+    style F fill:#f3e5f5
+    style G fill:#f3e极f5
+    style N fill:#e8f5e8
+    style O fill:#fff3e0
+```
+
+### Docker 资源管理
+
+```mermaid
+graph TD
+    subgraph "资源分配"
+        A[主机资源] --> B[CPU 核心]
+        A --> C[内存 GB]
+        A --> D[磁盘空间]
+        A --> E[网络带宽]
+        
+        B --> F[容器限制]
+        C --> F
+        D -->极
+        E --> F
+    end
+    
+    subgraph "容器配置"
+        F --> G[--cpus=4]
+        F --> H[--memory=8g]
+        F --> I[--shm-size=2g]
+        F --> J[卷挂载]
+        
+        G --> K[浏览器进程]
+        H --> L[浏览器内存]
+        I --> M[浏览器共享内存]
+        J --> N[配置与缓存存储]
+    end
+    
+    subgraph "监控与扩展"
+        O[资源监控器] --> P[CPU 使用率 %]
+        O --> Q[内存使用率 %]
+        O --> R[请求队列长度]
+        
+        P --> S{CPU > 80%?}
+        Q --> T{内存 > 90%?}
+        R --> U{队列 > 100?}
+        
+        S -->|是| V[扩展]
+        T -->|是| V
+        U -->|是| V
+        
+        V --> W[添加容器实例]
+        W --> X[更新负载均衡器]
+    end
+    
+    subgraph "性能优化"
+        Y[浏览器池调优] --> Z[最大页面数: 40]
+        Y --> AA[空闲 TTL: 30分钟]
+        Y --> BB[并发限制]
+        
+        Z --> CC[内存效率]
+        AA --> DD[资源清理]
+        BB --> EE[吞吐量控制]
+    end
+    
+    style A fill:#e1f5fe
+    style F fill:#f3e5f5
+    style O fill:#e8f5e8
+    style Y fill:#fff3e0
+```
+
+**📖 了解更多:** [Docker 部署指南](https://docs.crawl4ai.com/core/docker-deployment/), [API 参考](https://docs.crawl4ai.com/api/), [MCP 集成](https://docs.crawl4ai.com/core/docker-deployment/#mcp-model-context-protocol-support), [生产环境配置](https://docs.crawl4ai.com/core/docker-deployment/#production-deployment)

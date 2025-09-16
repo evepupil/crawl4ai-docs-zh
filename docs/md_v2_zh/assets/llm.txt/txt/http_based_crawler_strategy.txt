@@ -1,0 +1,388 @@
+## HTTP 爬虫策略
+
+快速、轻量级的纯 HTTP 爬取，无需浏览器开销，适用于不需要 JavaScript 执行的场景。
+
+### 基础 HTTP 爬虫设置
+
+```python
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, HTTPCrawlerConfig, CacheMode
+from crawl4ai.async_crawler_strategy import AsyncHTTPCrawlerStrategy
+from crawl4ai.async_logger import AsyncLogger
+
+async def main():
+    # 初始化 HTTP 策略
+    http_strategy = AsyncHTTPCrawlerStrategy(
+        browser_config=HTTPCrawlerConfig(
+            method="GET",
+            verify_ssl=True,
+            follow_redirects=True
+        ),
+        logger=AsyncLogger(verbose=True)
+    )
+
+    # 与 AsyncWebCrawler 配合使用
+    async with AsyncWebCrawler(crawler_strategy=http_strategy) as crawler:
+        result = await crawler.arun("https://example.com")
+        print(f"状态: {result.status_code}")
+        print(f"内容: {len(result.html)} 字符")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### HTTP 请求类型
+
+```python
+# GET 请求（默认）
+http_config = HTTPCrawlerConfig(
+    method="GET",
+    headers={"Accept": "application/json"}
+)
+
+# 带 JSON 数据的 POST 请求
+http_config = HTTPCrawlerConfig(
+    method="POST",
+    json={"key": "value", "data": [1, 2, 3]},
+    headers={"Content-Type": "application/json"}
+)
+
+# 带表单数据的 POST 请求
+http_config = HTTPCrawlerConfig(
+    method="POST",
+    data={"username": "user", "password": "pass"},
+    headers={"Content-Type": "application/x-www-form-urlencoded"}
+)
+
+# 高级配置
+http_config = HTTPCrawlerConfig(
+    method="GET",
+    headers={"User-Agent": "Custom Bot/1.0"},
+    follow_redirects=True,
+    verify_ssl=False  # 用于测试环境
+)
+
+strategy = AsyncHTTPCrawlerStrategy(browser_config=http_config)
+```
+
+### 文件和原始内容处理
+
+```python
+async def test_content_types():
+    strategy = AsyncHTTPCrawlerStrategy()
+    
+    # 网页 URL
+    result = await strategy.crawl("https://httpbin.org/get")
+    print(f"网页内容: {result.status_code}")
+    
+    # 本地文件
+    result = await strategy.crawl("file:///path/to/local/file.html")
+    print(f"文件内容: {len(result.html)}")
+    
+    # 原始 HTML 内容
+    raw_html = "raw://<html><body><h1>Test</h1><p>Content</p></body></html>"
+    result = await strategy.crawl(raw_html)
+    print(f"原始内容: {result.html}")
+    
+    # 带复杂 HTML 的原始内容
+    complex_html = """raw://<!DOCTYPE html>
+    <html>
+    <head><title>Test Page</title></head>
+    <body>
+        <div class="content">
+            <h1>Main Title</h1>
+            <p>Paragraph content</p>
+            <ul><li>Item 1</li><li>Item 2</li></ul>
+        </div>
+    </body>
+    </html>"""
+    result = await strategy.crawl(complex_html)
+```
+
+### 自定义钩子和请求处理
+
+```python
+async def setup_hooks():
+    strategy = AsyncHTTPCrawlerStrategy()
+    
+    # 请求前钩子
+    async def before_request(url, kwargs):
+        print(f"请求: {url}")
+        kwargs['headers']['X-Custom-Header'] = 'crawl4ai'
+        kwargs['headers']['Authorization'] = 'Bearer token123'
+    
+    # 请求后钩子
+    async def after_request(response):
+        print(f"响应: {response.status_code}")
+        if hasattr(response, 'redirected_url'):
+            print(f"重定向至: {response.redirected_url}")
+    
+    # 错误处理钩子
+    async def on_error(error):
+        print(f"请求失败: {error}")
+    
+    # 设置钩子
+    strategy.set_hook('before_request', before_request)
+    strategy.set_hook('after_request', after_request)
+    strategy.set_hook('on_error', on_error)
+    
+    # 使用带钩子的策略
+    result = await strategy.crawl("https://httpbin.org/headers")
+    return result
+```
+
+### 性能配置
+
+```python
+# 高性能设置
+strategy = AsyncHTTPCrawlerStrategy(
+    max_connections=50,        # 并发连接数
+    dns_cache_ttl=300,        # DNS 缓存超时
+    chunk_size=128 * 1024     # 大文件分块大小为 128KB
+)
+
+# 大文件的内存高效设置
+strategy = AsyncHTTPCrawlerStrategy(
+    max_connections=10,
+    chunk_size=32 * 1024,     # 较小分块
+    dns_cache_ttl=600
+)
+
+# 自定义超时配置
+config = CrawlerRunConfig(
+    page_timeout=30000,       # 30 秒超时
+    cache_mode=CacheMode.BYPASS
+)
+
+result = await strategy.crawl("https://slow-server.com", config=config)
+```
+
+### 错误处理和重试机制
+
+```python
+from crawl4ai.async_crawler_strategy import (
+    ConnectionTimeoutError, 
+    HTTPStatusError, 
+    HTTPCrawlerError
+)
+
+async def robust_crawling():
+    strategy = AsyncHTTPCrawlerStrategy()
+    
+    urls = [
+        "https://example.com",
+        "https://httpbin.org/status/404",
+        "https://nonexistent.domain.test"
+    ]
+    
+    for url in urls:
+        try:
+            result = await strategy.crawl(url)
+            print(f"✓ {url}: {result.status_code}")
+            
+        except HTTPStatusError as e:
+            print(f"✗ {url}: HTTP {e.status_code}")
+            
+        except ConnectionTimeoutError as e:
+            print(f"✗ {url}: 超时 - {e}")
+            
+        except HTTPCrawlerError as e:
+            print(f"✗ {url}: 爬虫错误 - {e}")
+            
+        except Exception as e:
+            print(f"✗ {url}: 意外错误 - {e}")
+
+# 重试机制
+async def crawl_with_retry(url, max_retries=3):
+    strategy = AsyncHTTPCrawlerStrategy()
+    
+    for attempt in range(max_retries):
+        try:
+            return await strategy.crawl(url)
+        except (ConnectionTimeoutError, HTTPCrawlerError) as e:
+            if attempt == max_retries - 1:
+                raise
+            print(f"重试 {attempt + 1}/{max_retries}: {e}")
+            await asyncio.sleep(2 ** attempt)  # 指数退避
+```
+
+### 使用 HTTP 策略的批量处理
+
+```python
+async def batch_http_crawling():
+    strategy = AsyncHTTPCrawlerStrategy(max_connections=20)
+    
+    urls = [
+        "https://httpbin.org/get",
+        "https://httpbin.org/user-agent",
+        "https://httpbin.org/headers",
+        "https://example.com",
+        "https://httpbin.org/json"
+    ]
+    
+    # 顺序处理
+    results = []
+    async with strategy:
+        for url in urls:
+            try:
+                result = await strategy.crawl(url)
+                results.append((url, result.status_code, len(result.html)))
+            except Exception as e:
+                results.append((url, "错误", str(e)))
+    
+    for url, status, content_info in results:
+        print(f"{url}: {status} - {content_info}")
+
+# 并发处理
+async def concurrent_http_crawling():
+    strategy = AsyncHTTPCrawlerStrategy()
+    urls = ["https://httpbin.org/delay/1"] * 5
+    
+    async def crawl_single(url):
+        try:
+            result = await strategy.crawl(url)
+            return f"✓ {result.status_code}"
+        except Exception as e:
+            return f"✗ {e}"
+    
+    async with strategy:
+        tasks = [crawl_single(url) for url in urls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    for i, result in enumerate(results):
+        print(f"URL {i+1}: {result}")
+```
+
+### 与内容处理的集成
+
+```python
+from crawl4ai import DefaultMarkdownGenerator, PruningContentFilter
+
+async def http_with_processing():
+    # 带内容处理的 HTTP 策略
+    http_strategy = AsyncHTTPCrawlerStrategy(
+        browser_config=HTTPCrawlerConfig(verify_ssl=True)
+    )
+    
+    # 配置 Markdown 生成
+    crawler_config = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        markdown_generator=DefaultMarkdownGenerator(
+            content_filter=PruningContentFilter(
+                threshold=0.48,
+                threshold_type="fixed",
+                min_word_threshold=10
+            )
+        ),
+        word_count_threshold=5,
+        excluded_tags=['script', 'style', 'nav'],
+        exclude_external_links=True
+    )
+    
+    async with AsyncWebCrawler(crawler_strategy=http_strategy) as crawler:
+        result = await crawler.arun(
+            url="https://example.com",
+            config=crawler_config
+        )
+        
+        print(f"状态: {result.status_code}")
+        print(f"原始 HTML: {len(result.html)} 字符")
+        if result.markdown:
+            print(f"Markdown: {len(result.markdown.raw_markdown)} 字符")
+            if result.markdown.fit_markdown:
+                print(f"过滤后: {len(result.markdown.fit_markdown)} 字符")
+```
+
+### HTTP 与浏览器策略对比
+
+```python
+async def strategy_comparison():
+    # 相同 URL 使用不同策略
+    url = "https://example.com"
+    
+    # HTTP 策略（快速，无 JS）
+    http_strategy = AsyncHTTPCrawlerStrategy()
+    start_time = time.time()
+    http_result = await http_strategy.crawl(url)
+    http_time = time.time() - start_time
+    
+    # 浏览器策略（完整功能）
+    from crawl4ai import BrowserConfig
+    browser_config = BrowserConfig(headless=True)
+    start_time = time.time()
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        browser_result = await crawler.arun(url)
+    browser_time = time.time() - start_time
+    
+    print(f"HTTP 策略:")
+    print(f"  时间: {http_time:.2f}秒")
+    print(f"  内容: {len(http_result.html)} 字符")
+    print(f"  特性: 快速、轻量级、无 JS")
+    
+    print(f"浏览器策略:")
+    print(f"  时间: {browser_time:.2f}秒") 
+    print(f"  内容: {len(browser_result.html)} 字符")
+    print(f"  特性: 完整浏览器、JS、截图等功能")
+    
+    # 何时使用 HTTP 策略：
+    # - 静态内容网站
+    # - 返回 HTML 的 API
+    # - 快速批量处理
+    # - 不需要 JavaScript
+    # - 内存/资源受限
+    
+    # 何时使用浏览器策略：
+    # - 动态内容（SPA、AJAX）
+    # - JavaScript 密集型网站
+    # - 需要截图/PDF
+    # - 需要复杂交互
+```
+
+### 高级配置
+
+```python
+# 自定义会话配置
+import aiohttp
+
+async def advanced_http_setup():
+    # 带特定设置的自定义连接器
+    connector = aiohttp.TCPConnector(
+        limit=100,              # 连接池大小
+        ttl_dns_cache=600,      # DNS 缓存 TTL
+        use_dns_cache=True,     # 启用 DNS 缓存
+        keepalive_timeout=30,   # 保持连接超时
+        force_close=False       # 重用连接
+    )
+    
+    strategy = AsyncHTTPCrawlerStrategy(
+        max_connections=50,
+        dns_cache_ttl=600,
+        chunk_size=64 * 1024
+    )
+    
+    # 所有请求的自定义头部
+    http_config = HTTPCrawlerConfig(
+        headers={
+            "User-Agent": "Crawl4AI-HTTP/1.0",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1"
+        },
+        verify_ssl=True,
+        follow_redirects=True
+    )
+    
+    strategy.browser_config = http_config
+    
+    # 使用自定义超时
+    config = CrawlerRunConfig(
+        page_timeout=45000,  # 45 秒
+        cache_mode=CacheMode.ENABLED
+    )
+    
+    result = await strategy.crawl("https://example.com", config=config)
+    await strategy.close()
+```
+
+**📖 了解更多:** [AsyncWebCrawler API](https://docs.crawl4ai.com/api/async-webcrawler/), [浏览器与 HTTP 策略对比](https://docs.crawl4ai.com/core/browser-crawler-config/), [性能优化](https://docs.crawl4ai.com/advanced/multi-url-crawling/)

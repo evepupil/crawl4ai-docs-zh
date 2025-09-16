@@ -1,0 +1,368 @@
+## 安装流程与架构
+
+Crawl4AI安装过程、部署选项及系统交互的可视化呈现。
+
+### 安装决策流程图
+
+```mermaid
+flowchart TD
+    A[开始安装] --> B{环境类型?}
+    
+    B -->|本地开发| C[基础Python安装]
+    B -->|生产环境| D[Docker部署]
+    B -->|研究/测试| E[Google Colab]
+    B -->|CI/CD流水线| F[自动化配置]
+    
+    C --> C1[pip install crawl4ai]
+    C1 --> C2[crawl4ai-setup]
+    C2 --> C3{需要高级功能?}
+    
+    C3 -->|否| C4[基础安装完成]
+    C3 -->|文本聚类| C5[pip install crawl4ai with torch]
+    C3 -->|Transformers| C6[pip install crawl4ai with transformer]
+    C3 -->|全部功能| C7[pip install crawl4ai with all]
+    
+    C5 --> C8[crawl4ai-download-models]
+    C6 --> C8
+    C7 --> C8
+    C8 --> C9[高级安装完成]
+    
+    D --> D1{部署方式?}
+    D1 -->|预构建镜像| D2[docker pull unclecode/crawl4ai]
+    D1 -->|Docker Compose| D3[克隆仓库 + docker compose]
+    D1 -->|自定义构建| D4[docker buildx build]
+    
+    D2 --> D5[配置.llm.env]
+    D3 --> D5
+    D4 --> D5
+    D5 --> D6[docker run with ports]
+    D6 --> D7[Docker部署完成]
+    
+    E --> E1[Colab pip安装]
+    E1 --> E2[playwright install chromium]
+    E2 --> E3[测试基础爬取]
+    E3 --> E4[Colab配置完成]
+    
+    F --> F1[自动化pip安装]
+    F1 --> F2[自动化配置脚本]
+    F2 --> F3[CI/CD集成完成]
+    
+    C4 --> G[通过crawl4ai-doctor验证]
+    C9 --> G
+    D7 --> H[通过API健康检查]
+    E4 --> I[运行测试爬取]
+    F3 --> G
+    
+    G --> J[安装验证通过]
+    H --> J
+    I --> J
+    
+    style A fill:#e1f5fe
+    style J fill:#c8e6c9
+    style C4 fill:#fff3e0
+    style C9 fill:#fff3e0
+    style D7 fill:#f3e5f5
+    style E4 fill:#fce4ec
+    style F3 fill:#e8f5e8
+```
+
+### 基础安装时序图
+
+```mermaid
+sequenceDiagram
+    participant 用户
+    participant PyPI
+    participant 系统
+    participant Playwright
+    participant 爬虫程序
+    
+    用户->>PyPI: pip install crawl4ai
+    PyPI-->>用户: 下载完成
+    
+    用户->>系统: crawl4ai-setup
+    系统->>Playwright: 安装浏览器二进制文件
+    Playwright-->>系统: 安装Chromium/Firefox
+    系统-->>用户: 配置完成
+    
+    用户->>系统: crawl4ai-doctor
+    系统->>系统: 检查Python版本
+    系统->>系统: 验证Playwright安装
+    系统->>系统: 测试浏览器启动
+    系统-->>用户: 诊断报告
+    
+    用户->>爬虫程序: 基础爬取测试
+    爬虫程序->>Playwright: 启动浏览器
+    Playwright-->>爬虫程序: 浏览器就绪
+    爬虫程序->>爬虫程序: 访问测试URL
+    爬虫程序-->>用户: 成功确认
+```
+
+### Docker部署架构图
+
+```mermaid
+graph TB
+    subgraph "宿主系统"
+        A[Docker引擎] --> B[Crawl4AI容器]
+        C[.llm.env配置文件] --> B
+        D[端口11235] --> B
+    end
+    
+    subgraph "容器环境"
+        B --> E[FastAPI服务器]
+        B --> F[Playwright浏览器]
+        B --> G[Python运行时]
+        
+        E --> H[/crawl接口]
+        E --> I[/playground界面]
+        E --> J[/health监控]
+        E --> K[/metrics指标]
+        
+        F --> L[Chromium浏览器]
+        F --> M[Firefox浏览器]
+        F --> N[WebKit浏览器]
+    end
+    
+    subgraph "外部服务"
+        O[OpenAI API] --> B
+        P[Anthropic API] --> B
+        Q[本地LLM Ollama] --> B
+    end
+    
+    subgraph "客户端应用"
+        R[Python SDK] --> H
+        S[REST API调用] --> H
+        T[网页浏览器] --> I
+        U[监控工具] --> J
+        V[Prometheus] --> K
+    end
+    
+    style B fill:#e3f2fd
+    style E fill:#f3e5f5
+    style F fill:#e8f5e8
+    style G fill:#fff3e0
+```
+
+### 高级功能安装流程图
+
+```mermaid
+stateDiagram-v2
+    [*] --> 基础安装
+    
+    基础安装 --> 功能选择: crawl4ai已安装
+    
+    功能选择 --> Torch安装: 需要文本聚类
+    功能选择 --> Transformer安装: 需要HuggingFace模型
+    功能选择 --> 全功能安装: 需要全部特性
+    功能选择 --> 完成: 基础功能已满足
+    
+    Torch安装 --> Torch配置: pip install crawl4ai with torch
+    Transformer安装 --> Transformer配置: pip install crawl4ai with transformer  
+    全功能安装 --> 全功能配置: pip install crawl4ai with all
+    
+    Torch配置 --> 模型下载: crawl4ai-setup
+    Transformer配置 --> 模型下载: crawl4ai-setup
+    全功能配置 --> 模型下载: crawl4ai-setup
+    
+    模型下载 --> 预下载: crawl4ai-download-models
+    预下载 --> 完成: 所有模型已缓存
+    
+    完成 --> 验证: crawl4ai-doctor
+    验证 --> [*]: 安装验证通过
+    
+    note right of Torch安装 : 用于语义操作的PyTorch
+    note right of Transformer安装 : 用于LLM功能的HuggingFace
+    note right of 全功能安装 : 完整功能集
+```
+
+### 平台特定安装矩阵
+
+```mermaid
+graph LR
+    subgraph "安装方式"
+        A[Python包] --> A1[pip install]
+        B[Docker镜像] --> B1[docker pull]
+        C[源码构建] --> C1[git clone + build]
+        D[云平台] --> D1[Colab/Kaggle]
+    end
+    
+    subgraph "操作系统"
+        E[Linux x86_64]
+        F[Linux ARM64] 
+        G[macOS Intel]
+        H[macOS Apple Silicon]
+        I[Windows x86_64]
+    end
+    
+    subgraph "功能集"
+        J[基础爬取]
+        K[文本聚类torch]
+        L[LLM transformers]
+        M[全部功能]
+    end
+    
+    A1 --> E
+    A1 --> F
+    A1 --> G
+    A1 --> H
+    A1 --> I
+    
+    B1 --> E
+    B1 --> F
+    B1 --> G
+    B1 --> H
+    
+    C1 --> E
+    C1 --> F
+    C1 --> G
+    C1 --> H
+    C1 --> I
+    
+    D1 --> E
+    D1 --> I
+    
+    E --> J
+    E --> K
+    E --> L
+    E --> M
+    
+    F --> J
+    F --> K
+    F --> L
+    F --> M
+    
+    G --> J
+    G --> K
+    G --> L
+    G --> M
+    
+    H --> J
+    H --> K
+    H --> L
+    H --> M
+    
+    I --> J
+    I --> K
+    I --> L
+    I --> M
+    
+    style A1 fill:#e3f2fd
+    style B1 fill:#f3e5f5
+    style C1 fill:#e8f5e8
+    style D1 fill:#fff3e0
+```
+
+### Docker多阶段构建流程
+
+```mermaid
+sequenceDiagram
+    participant 开发者
+    participant Git as GitHub仓库
+    participant Docker as Docker引擎
+    participant Registry as Docker Hub
+    participant 用户
+    
+    开发者->>Git: 推送代码变更
+    
+    Docker->>Git: 克隆仓库
+    Docker->>Docker: 阶段1 - 基础Python镜像
+    Docker->>Docker: 阶段2 - 安装依赖
+    Docker->>Docker: 阶段3 - 安装Playwright
+    Docker->>Docker: 阶段4 - 拷贝应用代码
+    Docker->>Docker: 阶段5 - 配置FastAPI服务器
+    
+    Note over Docker: 多架构构建
+    Docker->>Docker: 构建linux/amd64
+    Docker->>Docker: 构建linux/arm64
+    
+    Docker->>Registry: 推送多架构清单
+    Registry-->>Docker: 构建完成
+    
+    用户->>Registry: docker pull unclecode/crawl4ai
+    Registry-->>用户: 下载对应架构
+    
+    用户->>Docker: docker run配置
+    Docker->>Docker: 启动容器
+    Docker->>Docker: 初始化FastAPI服务器
+    Docker->>Docker: 配置Playwright浏览器
+    Docker-->>用户: 服务就绪于11235端口
+```
+
+### 安装验证工作流
+
+```mermaid
+flowchart TD
+    A[安装完成] --> B[运行crawl4ai-doctor]
+    
+    B --> C{Python版本检查}
+    C -->|✓ 3.10+| D{Playwright检查}
+    C -->|✗ < 3.10| C1[升级Python]
+    C1 --> D
+    
+    D -->|✓ 已安装| E{浏览器二进制}
+    D -->|✗ 缺失| D1[运行crawl4ai-setup]
+    D1 --> E
+    
+    E -->|✓ 可用| F{测试浏览器启动}
+    E -->|✗ 缺失| E1[playwright install]
+    E1 --> F
+    
+    F -->|✓ 成功| G[测试基础爬取]
+    F -->|✗ 失败| F1[检查系统依赖]
+    F1 --> F
+    
+    G --> H{爬取测试结果}
+    H -->|✓ 成功| I[安装验证通过 ✓]
+    H -->|✗ 失败| H1[检查网络/权限]
+    H1 --> G
+    
+    I --> J[准备投入生产]
+    
+    style I fill:#c8e6c9
+    style J fill:#e8f5e8
+    style C1 fill:#ffcdd2
+    style D1 fill:#fff3e0
+    style E1 fill:#fff3e0
+    style F1 fill:#ffcdd2
+    style H1 fill:#ffcdd2
+```
+
+### 各安装类型资源需求
+
+```mermaid
+graph TD
+    subgraph "基础安装"
+        A1[内存: 512MB]
+        A2[磁盘: 2GB]
+        A3[CPU: 1核]
+        A4[网络: 配置时需要]
+    end
+    
+    subgraph "高级功能torch"
+        B1[内存: 2GB+]
+        B2[磁盘: 5GB+]
+        B3[CPU: 2+核]
+        B4[GPU: 可选CUDA]
+    end
+    
+    subgraph "全部功能"
+        C1[内存: 4GB+]
+        C2[磁盘: 10GB+]
+        C3[CPU: 4+核]
+        C4[GPU: 推荐]
+    end
+    
+    subgraph "Docker部署"
+        D1[内存: 1GB+]
+        D2[磁盘: 3GB+]
+        D3[CPU: 2+核]
+        D4[端口: 11235]
+        D5[共享内存: 1GB]
+    end
+    
+    style A1 fill:#e8f5e8
+    style B1 fill:#fff3e0
+    style C1 fill:#ffecb3
+    style D1 fill:#e3f2fd
+```
+
+**📖 了解更多:** [安装指南](https://docs.crawl4ai.com/core/installation/), [Docker部署](https://docs.crawl4ai.com/core/docker-deployment/), [系统需求](https://docs.crawl4ai.com/core/installation/#prerequisites)

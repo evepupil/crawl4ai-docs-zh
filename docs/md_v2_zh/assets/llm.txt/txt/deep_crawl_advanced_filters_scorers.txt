@@ -1,0 +1,446 @@
+## 深度爬取过滤器与评分器
+
+用于智能深度爬取的高级URL过滤与评分策略，具备性能优化功能。
+
+### URL过滤器 - 内容与域名控制
+
+```python
+from crawl4ai.deep_crawling.filters import (
+    URLPatternFilter, DomainFilter, ContentTypeFilter, 
+    FilterChain, ContentRelevanceFilter, SEOFilter
+)
+
+# 基于模式的过滤
+pattern_filter = URLPatternFilter(
+    patterns=[
+        "*.html",           # 仅HTML页面
+        "*/blog/*",         # 博客文章
+        "*/articles/*",     # 文章页面
+        "*2024*",          # 近期内容
+        "^https://example.com/docs/.*"  # 正则表达式模式
+    ],
+    use_glob=True,
+    reverse=False  # False = 包含匹配项，True = 排除匹配项
+)
+
+# 包含子域的域名过滤
+domain_filter = DomainFilter(
+    allowed_domains=["example.com", "docs.example.com"],
+    blocked_domains=["ads.example.com", "tracker.com"]
+)
+
+# 内容类型过滤
+content_filter = ContentTypeFilter(
+    allowed_types=["text/html", "application/pdf"],
+    check_extension=True
+)
+
+# 应用单个过滤器
+url = "https://example.com/blog/2024/article.html"
+print(f"模式过滤器: {pattern_filter.apply(url)}")
+print(f"域名过滤器: {domain_filter.apply(url)}")
+print(f"内容过滤器: {content_filter.apply(url)}")
+```
+
+### 过滤器链 - 组合多个过滤器
+
+```python
+# 创建综合过滤的过滤器链
+filter_chain = FilterChain([
+    DomainFilter(allowed_domains=["example.com"]),
+    URLPatternFilter(patterns=["*/blog/*", "*/docs/*"]),
+    ContentTypeFilter(allowed_types=["text/html"])
+])
+
+# 对URL应用链式过滤
+urls = [
+    "https://example.com/blog/post1.html",
+    "https://spam.com/content.html",
+    "https://example.com/blog/image.jpg",
+    "https://example.com/docs/guide.html"
+]
+
+async def filter_urls(urls, filter_chain):
+    filtered = []
+    for url in urls:
+        if await filter_chain.apply(url):
+            filtered.append(url)
+    return filtered
+
+# 使用示例
+filtered_urls = await filter_urls(urls, filter_chain)
+print(f"过滤后的URL: {filtered_urls}")
+
+# 检查过滤器统计信息
+for filter_obj in filter_chain.filters:
+    stats = filter_obj.stats
+    print(f"{filter_obj.name}: {stats.passed_urls}/{stats.total_urls} 通过")
+```
+
+### 高级内容过滤器
+
+```python
+# 基于BM25的内容相关性过滤
+relevance_filter = ContentRelevanceFilter(
+    query="python机器学习教程",
+    threshold=0.5,  # 最小相关性分数
+    k1=1.2,        # TF饱和参数
+    b=0.75,        # 长度归一化参数
+    avgdl=1000     # 平均文档长度
+)
+
+# SEO质量过滤
+seo_filter = SEOFilter(
+    threshold=0.65,  # 最小SEO分数
+    keywords=["python", "tutorial", "guide"],
+    weights={
+        "title_length": 0.15,
+        "title_kw": 0.18,
+        "meta_description": 0.12,
+        "canonical": 0.10,
+        "robot_ok": 0.20,
+        "schema_org": 0.10,
+        "url_quality": 0.15
+    }
+)
+
+# 应用高级过滤器
+url = "https://example.com/python-ml-tutorial"
+relevance_score = await relevance_filter.apply(url)
+seo_score = await seo_filter.apply(url)
+
+print(f"相关性: {relevance_score}, SEO: {seo_score}")
+```
+
+### URL评分器 - 质量与相关性评分
+
+```python
+from crawl4ai.deep_crawling.scorers import (
+    KeywordRelevanceScorer, PathDepthScorer, ContentTypeScorer,
+    FreshnessScorer, DomainAuthorityScorer, CompositeScorer
+)
+
+# 关键词相关性评分
+keyword_scorer = KeywordRelevanceScorer(
+    keywords=["python", "tutorial", "guide", "machine", "learning"],
+    weight=1.0,
+    case_sensitive=False
+)
+
+# 路径深度评分（最佳深度 = 3）
+depth_scorer = PathDepthScorer(
+    optimal_depth=3,  # /category/subcategory/article
+    weight=0.8
+)
+
+# 内容类型评分
+content_type_scorer = ContentTypeScorer(
+    type_weights={
+        "html": 1.0,    # 最高优先级
+        "pdf": 0.8,     # 中等优先级
+        "txt": 0.6,     # 较低优先级
+        "doc": 0.4      # 最低优先级
+    },
+    weight=0.9
+)
+
+# 新鲜度评分
+freshness_scorer = FreshnessScorer(
+    weight=0.7,
+    current_year=2024
+)
+
+# 域名权威性评分
+domain_scorer = DomainAuthorityScorer(
+    domain_weights={
+        "python.org": 1.0,
+        "github.com": 0.9,
+        "stackoverflow.com": 0.85,
+        "medium.com": 0.7,
+        "personal-blog.com": 0.3
+    },
+    default_weight=0.5,
+    weight=1.0
+)
+
+# 对单个URL评分
+url = "https://python.org/tutorial/2024/machine-learning.html"
+scores = {
+    "keyword": keyword_scorer.score(url),
+    "depth": depth_scorer.score(url),
+    "content": content_type_scorer.score(url),
+    "freshness": freshness_scorer.score(url),
+    "domain": domain_scorer.score(url)
+}
+
+print(f"单项评分: {scores}")
+```
+
+### 综合评分 - 组合多个评分器
+
+```python
+# 创建组合所有策略的综合评分器
+composite_scorer = CompositeScorer(
+    scorers=[
+        KeywordRelevanceScorer(["python", "tutorial"], weight=1.5),
+        PathDepthScorer(optimal_depth=3, weight=1.0),
+        ContentTypeScorer({"html": 1.0, "pdf": 0.8}, weight=1.2),
+        FreshnessScorer(weight=0.8, current_year=2024),
+        DomainAuthorityScorer({
+            "python.org": 1.0,
+            "github.com": 0.9
+        }, weight=1.3)
+    ],
+    normalize=True  # 按评分器数量归一化
+)
+
+# 对多个URL评分
+urls_to_score = [
+    "https://python.org/tutorial/2024/basics.html",
+    "https://github.com/user/python-guide/blob/main/README.md",
+    "https://random-blog.com/old/2018/python-stuff.html",
+    "https://python.org/docs/deep/nested/advanced/guide.html"
+]
+
+scored_urls = []
+for url in urls_to_score:
+    score = composite_scorer.score(url)
+    scored_urls.append((url, score))
+
+# 按分数排序（从高到低）
+scored_urls.sort(key=lambda x: x[1], reverse=True)
+
+for url, score in scored_urls:
+    print(f"评分: {score:.3f} - {url}")
+
+# 检查评分器统计信息
+print(f"\n评分统计:")
+print(f"已评分URL: {composite_scorer.stats._urls_scored}")
+print(f"平均分数: {composite_scorer.stats.get_average():.3f}")
+```
+
+### 高级过滤模式
+
+```python
+# 复杂模式匹配
+advanced_patterns = URLPatternFilter(
+    patterns=[
+        r"^https://docs\.python\.org/\d+/",  # 带版本的Python文档
+        r".*/tutorial/.*\.html$",             # 教程页面
+        r".*/guide/(?!deprecated).*",         # 指南页面但不包含已弃用内容
+        "*/blog/{2020,2021,2022,2023,2024}/*", # 近期博客文章
+        "**/{api,reference}/**/*.html"        # API/参考文档
+    ],
+    use_glob=True
+)
+
+# 排除模式 (reverse=True)
+exclude_filter = URLPatternFilter(
+    patterns=[
+        "*/admin/*",
+        "*/login/*", 
+        "*/private/*",
+        "**/.*",          # 隐藏文件
+        "*.{jpg,png,gif,css,js}$"  # 媒体和资源文件
+    ],
+    reverse=True  # 排除匹配模式
+)
+
+# 带扩展名映射的内容类型过滤
+detailed_content_filter = ContentTypeFilter(
+    allowed_types=["text", "application"],
+    check_extension=True,
+    ext_map={
+        "html": "text/html",
+        "htm": "text/html", 
+        "md": "text/markdown",
+        "pdf": "application/pdf",
+        "doc": "application/msword",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    }
+)
+```
+
+### 性能优化过滤
+
+```python
+# 用于大规模爬取的高性能过滤器链
+class OptimizedFilterChain:
+    def __init__(self):
+        # 先执行快速过滤器（域名、模式）
+        self.fast_filters = [
+            DomainFilter(
+                allowed_domains=["example.com", "docs.example.com"],
+                blocked_domains=["ads.example.com"]
+            ),
+            URLPatternFilter([
+                "*.html", "*.pdf", "*/blog/*", "*/docs/*"
+            ])
+        ]
+        
+        # 最后执行慢速过滤器（内容分析）
+        self.slow_filters = [
+            ContentRelevanceFilter(
+                query="重要内容",
+                threshold=0.3
+            )
+        ]
+    
+    async def apply_optimized(self, url: str) -> bool:
+        # 先应用快速过滤器
+        for filter_obj in self.fast_filters:
+            if not filter_obj.apply(url):
+                return False
+        
+        # 只有快速过滤器通过后才应用慢速过滤器
+        for filter_obj in self.slow_filters:
+            if not await filter_obj.apply(url):
+                return False
+        
+        return True
+
+# 并发批量过滤
+async def batch_filter_urls(urls, filter_chain, max_concurrent=50):
+    import asyncio
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def filter_single(url):
+        async with semaphore:
+            return await filter_chain.apply(url), url
+    
+    tasks = [filter_single(url) for url in urls]
+    results = await asyncio.gather(*tasks)
+    
+    return [url for passed, url in results if passed]
+
+# 处理1000个URL的使用示例
+large_url_list = [f"https://example.com/page{i}.html" for i in range(1000)]
+optimized_chain = OptimizedFilterChain()
+filtered = await batch_filter_urls(large_url_list, optimized_chain)
+```
+
+### 自定义过滤器实现
+
+```python
+from crawl4ai.deep_crawling.filters import URLFilter
+import re
+
+class CustomLanguageFilter(URLFilter):
+    """通过语言指示符过滤URL"""
+    
+    def __init__(self, allowed_languages=["en"], weight=1.0):
+        super().__init__()
+        self.allowed_languages = set(allowed_languages)
+        self.lang_patterns = {
+            "en": re.compile(r"/en/|/english/|lang=en"),
+            "es": re.compile(r"/es/|/spanish/|lang=es"),
+            "fr": re.compile(r"/fr/|/french/|lang=fr"),
+            "de": re.compile(r"/de/|/german/|lang=de")
+        }
+    
+    def apply(self, url: str) -> bool:
+        # 如果没有语言指示符，默认为英语
+        if not any(pattern.search(url) for pattern in self.lang_patterns.values()):
+            result = "en" in self.allowed_languages
+            self._update_stats(result)
+            return result
+        
+        # 检查允许的语言
+        for lang in self.allowed_languages:
+            if lang in self.lang_patterns:
+                if self.lang_patterns[lang].search(url):
+                    self._update_stats(True)
+                    return True
+        
+        self._update_stats(False)
+        return False
+
+# 自定义评分器实现
+from crawl4ai.deep_crawling.scorers import URLScorer
+
+class CustomComplexityScorer(URLScorer):
+    """通过内容复杂度指示符对URL评分"""
+    
+    def __init__(self, weight=1.0):
+        super().__init__(weight)
+        self.complexity_indicators = {
+            "tutorial": 0.9,
+            "guide": 0.8, 
+            "example": 0.7,
+            "reference": 极客,
+            "api": 0.5
+        }
+    
+    def _calculate_score极客 url: str) -> float:
+        url_lower = url.lower()
+        max_score = 0.0
+        
+        for indicator, score in self.complexity_indicators.items():
+            if indicator in url_lower:
+                max_score = max(max_score, score)
+        
+        return max_score
+
+# 使用自定义过滤器和评分器
+custom_filter = CustomLanguageFilter(allowed_languages=["en", "es"])
+custom_scorer = CustomComplexityScorer(weight=1.2)
+
+url = "https://example.com/en/tutorial/advanced-guide.html"
+passes_filter = custom_filter.apply(url)
+complexity_score = custom_scorer.score(url)
+
+print(f"通过语言过滤器: {passes_filter}")
+print(f"复杂度评分: {complexity_score}")
+```
+
+### 与深度爬取集成
+
+```python
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import DeepCrawlStrategy
+
+async def deep_crawl_with_filtering():
+    # 创建综合过滤器链
+    filter_chain = FilterChain([
+        Domain极客 allowed_domains=["python.org"]),
+        URLPatternFilter(["*/tutorial/*", "*/guide/*", "*/docs/*"]),
+        ContentTypeFilter(["text/html"]),
+        SEOFilter(threshold=0.6, keywords=["python", "programming"])
+    ])
+    
+    # 创建综合评分器
+    scorer = CompositeScorer([
+        KeywordRelevanceScorer(["python", "tutorial"], weight=1.5),
+        FreshnessScorer(weight=0.8),
+        PathDepthScorer(optimal_depth=3, weight=1.0)
+    ], normalize=True)
+    
+    # 使用过滤器和评分器配置深度爬取策略
+    deep_strategy = DeepCrawlStrategy(
+        max_depth=3,
+        max_pages=100,
+        url_filter=filter_chain,
+        url_scorer=scorer,
+        score_threshold=0.6  # 仅爬取评分高于0.6的URL
+    )
+    
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=deep_strategy,
+        cache_mode=CacheMode.BYPASS
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://python.org",
+            config=config
+        )
+        
+        print(f"深度爬取完成: {result.success}")
+        if hasattr(result, 'deep_crawl_results'):
+            print(f"已爬取页面: {len(result.deep_crawl_results)}")
+
+# 运行深度爬取
+await deep_crawl_with_filtering()
+```
+
+**📖 了解更多:** [深度爬取策略](https://docs.crawl4ai.com/core/deep-crawling/), [自定义过滤器开发](https://docs.crawl4ai.com/advanced/custom-filters/), [性能优化](https://docs.crawl4ai.com/advanced/performance-tuning/)

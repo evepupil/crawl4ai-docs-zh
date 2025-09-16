@@ -1,0 +1,231 @@
+## 安装
+
+提供多种安装选项以适应不同环境和使用场景。
+
+### 基础安装
+
+```bash
+# 安装核心库
+pip install crawl4ai
+
+# 初始设置（安装Playwright浏览器）
+crawl4ai-setup
+
+# 验证安装
+crawl4ai-doctor
+```
+
+### 快速验证
+
+```python
+import asyncio
+from crawl4ai import AsyncWebCrawler
+
+async def main():
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com")
+        print(result.markdown[:300])
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+**📖 了解更多:** [基础使用指南](https://docs.crawl4ai.com/core/quickstart.md)
+
+### 高级功能（可选）
+
+```bash
+# 基于PyTorch的功能（文本聚类、语义分块）
+pip install crawl4ai[torch]
+crawl4ai-setup
+
+# Transformers（Hugging Face模型）
+pip install crawl4ai[transformer]
+crawl4ai-setup
+
+# 所有功能（大容量下载）
+pip install crawl4ai[all]
+crawl4ai-setup
+
+# 预下载模型（可选）
+crawl4ai-download-models
+```
+
+**📖 了解更多:** [高级功能文档](https://docs.crawl4ai.com/extraction/llm-strategies.md)
+
+### Docker部署
+
+```bash
+# 拉取预构建镜像（指定平台保持一致性）
+docker pull --platform linux/amd64 unclecode/crawl4ai:latest
+# 针对ARM架构（M1/M2 Mac）：docker pull --platform linux/arm64 unclecode/crawl4ai:latest
+
+# 设置LLM支持环境
+cat > .llm.env << EOL
+OPENAI_API_KEY=sk-your-key
+ANTHROPIC_API_KEY=your-anthropic-key
+EOL
+
+# 运行带LLM支持的容器（指定平台）
+docker run -d \
+  --platform linux/amd64 \
+  -p 11235:11235 \
+  --name crawl4ai \
+  --env-file .llm.env \
+  --shm-size=1g \
+  unclecode/crawl4ai:latest
+
+# 针对ARM架构Mac，使用：--platform linux/arm64
+
+# 基础运行（无LLM）
+docker run -d \
+  --platform linux/amd64 \
+  -p 11235:11235 \
+  --name crawl4ai \
+  --shm-size=1g \
+  unclecode/crawl4ai:latest
+```
+
+**📖 了解更多:** [完整Docker指南](https://docs.crawl4ai.com/core/docker-deployment.md)
+
+### Docker Compose
+
+```bash
+# 克隆仓库
+git clone https://github.com/unclecode/crawl4ai.git
+cd crawl4ai
+
+# 复制环境模板
+cp deploy/docker/.llm.env.example .llm.env
+# 编辑.llm.env文件填入您的API密钥
+
+# 运行预构建镜像
+IMAGE=unclecode/crawl4ai:latest docker compose up -d
+
+# 本地构建并运行
+docker compose up --build -d
+
+# 构建全功能版本
+INSTALL_TYPE=all docker compose up --build -d
+
+# 停止服务
+docker compose down
+```
+
+**📖 了解更多:** [Docker Compose配置](https://docs.crawl4ai.com/core/docker-deployment.md#option-2-using-docker-compose)
+
+### 手动构建Docker镜像
+
+```bash
+# 构建多架构镜像（指定平台）
+docker buildx build --platform linux/amd64 -t crawl4ai-local:latest --load .
+# 针对ARM架构：docker buildx build --platform linux/arm64 -t crawl4ai-local:latest --load .
+
+# 构建特定功能版本
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg INSTALL_TYPE=all \
+  --build-arg ENABLE_GPU=false \
+  -t crawl4ai-local:latest --load .
+
+# 运行自定义构建（指定平台）
+docker run -d \
+  --platform linux/amd64 \
+  -p 11235:11235 \
+  --name crawl4ai-custom \
+  --env-file .llm.env \
+  --shm-size=1g \
+  crawl4ai-local:latest
+```
+
+**📖 了解更多:** [手动构建指南](https://docs.crawl4ai.com/core/docker-deployment.md#option-3-manual-local-build--run)
+
+### Google Colab
+
+```python
+# 在Colab中安装
+!pip install crawl4ai
+!crawl4ai-setup
+
+# 如果设置失败，手动安装Playwright浏览器
+!playwright install chromium
+
+# 安装全功能版本（可能需要5-10分钟）
+!pip install crawl4ai[all]
+!crawl4ai-setup
+!crawl4ai-download-models
+
+# 如果仍有问题，强制安装Playwright
+!playwright install chromium --force
+
+# 快速测试
+import asyncio
+from crawl4ai import AsyncWebCrawler
+
+async def test_crawl():
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com")
+        print("✅ 安装成功！")
+        print(f"内容长度: {len(result.markdown)}")
+
+# 在Colab中运行测试
+await test_crawl()
+```
+
+**📖 了解更多:** [Colab示例笔记本](https://colab.research.google.com/github/unclecode/crawl4ai/blob/main/docs/examples/quickstart.ipynb)
+
+### Docker API使用
+
+```python
+# 使用Docker SDK
+import asyncio
+from crawl4ai.docker_client import Crawl4aiDockerClient
+from crawl4ai import BrowserConfig, CrawlerRunConfig, CacheMode
+
+async def main():
+    async with Crawl4aiDockerClient(base_url="http://localhost:11235") as client:
+        results = await client.crawl(
+            ["https://example.com"],
+            browser_config=BrowserConfig(headless=True),
+            crawler_config=CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+        )
+        for result in results:
+            print(f"成功: {result.success}, 长度: {len(result.markdown)}")
+
+asyncio.run(main())
+```
+
+**📖 了解更多:** [Docker客户端API](https://docs.crawl4ai.com/core/docker-deployment.md#python-sdk)
+
+### 直接API调用
+
+```python
+# REST API示例
+import requests
+
+payload = {
+    "urls": ["https://example.com"],
+    "browser_config": {"type": "BrowserConfig", "params": {"headless": True}},
+    "crawler_config": {"type": "CrawlerRunConfig", "params": {"cache_mode": "bypass"}}
+}
+
+response = requests.post("http://localhost:11235/crawl", json=payload)
+print(response.json())
+```
+
+**📖 了解更多:** [REST API参考](https://docs.crawl4ai.com/core/docker-deployment.md#rest-api-examples)
+
+### 健康检查
+
+```bash
+# 检查Docker服务
+curl http://localhost:11235/health
+
+# 访问Playground
+open http://localhost:11235/playground
+
+# 查看指标
+curl http://localhost:11235/metrics
+```
+
+**📖 了解更多:** [监控与指标](https://docs.crawl4ai.com/core/docker-deployment.md#metrics--monitoring)

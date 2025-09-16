@@ -1,0 +1,348 @@
+## 深度爬取
+
+采用智能过滤、评分和优先级策略的多层级网站探索。
+
+### 基础深度爬取设置
+
+```python
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
+
+# 基础广度优先深度爬取
+async def basic_deep_crawl():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,               # 初始页面 + 2个层级
+            include_external=False     # 仅限同域名
+        ),
+        scraping_strategy=LXMLWebScrapingStrategy(),
+        verbose=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://docs.crawl4ai.com", config=config)
+        
+        # 按深度分组结果
+        pages_by_depth = {}
+        for result in results:
+            depth = result.metadata.get("depth", 0)
+            if depth not in pages_by_depth:
+                pages_by_depth[depth] = []
+            pages_by_depth[depth].append(result.url)
+        
+        print(f"共爬取 {len(results)} 个页面")
+        for depth, urls in sorted(pages_by_depth.items()):
+            print(f"深度 {depth}: {len(urls)} 个页面")
+```
+
+### 深度爬取策略
+
+```python
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy, DFSDeepCrawlStrategy, BestFirstCrawlingStrategy
+from crawl4ai.deep_crawling.scorers import KeywordRelevanceScorer
+
+# 广度优先搜索 - 先探索同一深度的所有链接
+bfs_strategy = BFSDeepCrawlStrategy(
+    max_depth=2,
+    include_external=False,
+    max_pages=50,              # 总页面限制
+    score_threshold=0.3        # URL最低分数
+)
+
+# 深度优先搜索 - 尽可能深入探索再回溯
+dfs_strategy = DFSDeepCrawlStrategy(
+    max_depth=2,
+    include_external=False,
+    max_pages=30,
+    score_threshold=0.5
+)
+
+# 最佳优先 - 优先处理高分页面（推荐）
+keyword_scorer = KeywordRelevanceScorer(
+    keywords=["crawl", "example", "async", "configuration"],
+    weight=0.7
+)
+
+best_first_strategy = BestFirstCrawlingStrategy(
+    max_depth=2,
+    include_external=False,
+    url_scorer=keyword_scorer,
+    max_pages=25               # 无需score_threshold - 自然优先
+)
+
+# 使用示例
+config = CrawlerRunConfig(
+    deep_crawl_strategy=best_first_strategy,  # 选择策略
+    scraping_strategy=LXMLWebScrapingStrategy()
+)
+```
+
+### 流式处理与批量处理
+
+```python
+# 批量模式 - 等待所有结果
+async def batch_deep_crawl():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(max_depth=1),
+        stream=False  # 默认 - 先收集所有结果
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        
+        # 一次性处理所有结果
+        for result in results:
+            print(f"批量处理: {result.url}")
+
+# 流式模式 - 实时处理到达结果
+async def streaming_deep_crawl():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(max_depth=1),
+        stream=True  # 立即处理结果
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun("https://example.com", config=config):
+            depth = result.metadata.get("depth", 0)
+            print(f"流式处理深度 {depth}: {result.url}")
+```
+
+### 过滤器链应用
+
+```python
+from crawl4ai.deep_crawling.filters import (
+    FilterChain,
+    URLPatternFilter,
+    DomainFilter,
+    ContentTypeFilter,
+    SEOFilter,
+    ContentRelevanceFilter
+)
+
+# 单URL模式过滤器
+url_filter = URLPatternFilter(patterns=["*core*", "*guide*"])
+
+config = CrawlerRunConfig(
+    deep_crawl_strategy=BFSDeepCrawlStrategy(
+        max_depth=1,
+        filter_chain=FilterChain([url_filter])
+    )
+)
+
+# 多过滤器链
+advanced_filter_chain = FilterChain([
+    # 域名过滤
+    DomainFilter(
+        allowed_domains=["docs.example.com"],
+        blocked_domains=["old.docs.example.com", "staging.example.com"]
+    ),
+    
+    # URL模式匹配
+    URLPatternFilter(patterns=["*tutorial*", "*guide*", "*blog*"]),
+    
+    # 内容类型过滤
+    ContentTypeFilter(allowed_types=["text/html"]),
+    
+    # SEO质量过滤
+    SEOFilter(
+        threshold=0.5,
+        keywords=["tutorial", "guide", "documentation"]
+    ),
+    
+    # 内容相关性过滤
+    ContentRelevanceFilter(
+        query="使用Python进行网页爬取和数据提取",
+        threshold=0.7
+    )
+])
+
+config = CrawlerRunConfig(
+    deep_crawl_strategy=BFSDeepCrawlStrategy(
+        max_depth=2,
+        filter_chain=advanced_filter_chain
+    )
+)
+```
+
+### 智能评分爬取
+
+```python
+from crawl4ai.deep_crawling.scorers import KeywordRelevanceScorer
+
+# 关键词相关性评分
+async def scored_deep_crawl():
+    keyword_scorer = KeywordRelevanceScorer(
+        keywords=["browser", "crawler", "web", "automation"],
+        weight=1.0
+    )
+    
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BestFirstCrawlingStrategy(
+            max_depth=2,
+            include_external=False,
+            url_scorer=keyword_scorer
+        ),
+        stream=True,  # 推荐与BestFirst配合使用
+        verbose=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun("https://docs.crawl4ai.com", config=config):
+            score = result.metadata.get("score", 0)
+            depth = result.metadata.get("depth", 0)
+            print(f"深度: {depth} | 评分: {score:.2f} | {result.url}")
+```
+
+### 爬取规模限制
+
+```python
+# 跨策略的页面数量限制
+async def limited_crawls():
+    # 带页面限制的BFS
+    bfs_config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            max_pages=5,  # 仅爬取5个页面
+            url_scorer=KeywordRelevanceScorer(keywords=["browser", "crawler"], weight=1.0)
+        )
+    )
+    
+    # 带分数阈值的DFS
+    dfs_config = CrawlerRunConfig(
+        deep_crawl_strategy=DFSDeepCrawlStrategy(
+            max_depth=2,
+            score_threshold=0.7,  # 仅分数高于0.7的URL
+            max_pages=10,
+            url_scorer=KeywordRelevanceScorer(keywords=["web", "automation"], weight=1.0)
+        )
+    )
+    
+    # 带双重约束的最佳优先
+    bf_config = CrawlerRunConfig(
+        deep_crawl_strategy=BestFirstCrawlingStrategy(
+            max_depth=2,
+            max_pages=7,  # 自动获取最高分页面
+            url_scorer=KeywordRelevanceScorer(keywords=["crawl", "example"], weight=1.0)
+        ),
+        stream=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        # 使用任意配置
+        async for result in await crawler.arun("https://docs.crawl4ai.com", config=bf_config):
+            score = result.metadata.get("score", 0)
+            print(f"评分: {score:.2f} | {result.url}")
+```
+
+### 完整高级深度爬虫
+
+```python
+async def comprehensive_deep_crawl():
+    # 复杂过滤器链
+    filter_chain = FilterChain([
+        DomainFilter(
+            allowed_domains=["docs.crawl4ai.com"],
+            blocked_domains=["old.docs.crawl4ai.com"]
+        ),
+        URLPatternFilter(patterns=["*core*", "*advanced*", "*blog*"]),
+        ContentTypeFilter(allowed_types=["text/html"]),
+        SEOFilter(threshold=0.4, keywords=["crawl", "tutorial", "guide"])
+    ])
+    
+    # 多关键词评分器
+    keyword_scorer = KeywordRelevanceScorer(
+        keywords=["crawl", "example", "async", "configuration", "browser"],
+        weight=0.8
+    )
+    
+    # 完整配置
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BestFirstCrawlingStrategy(
+            max_depth=2,
+            include_external=False,
+            filter_chain=filter_chain,
+            url_scorer=keyword_scorer,
+            max_pages=20
+        ),
+        scraping_strategy=LXMLWebScrapingStrategy(),
+        stream=True,
+        verbose=True,
+        cache_mode=CacheMode.BYPASS
+    )
+    
+    # 执行与分析
+    results = []
+    start_time = time.time()
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun("https://docs.crawl4ai.com", config=config):
+            results.append(result)
+            score = result.metadata.get("score", 0)
+            depth = result.metadata.get("depth", 0)
+            print(f"→ 深度: {depth} | 评分: {score:.2f} | {result.url}")
+    
+    # 性能分析
+    duration = time.time() - start_time
+    avg_score = sum(r.metadata.get('score', 0) for r in results) / len(results)
+    
+    print(f"✅ 共爬取 {len(results)} 个页面，耗时 {duration:.2f}秒")
+    print(f"✅ 平均相关性评分: {avg_score:.2f}")
+    
+    # 深度分布
+    depth_counts = {}
+    for result in results:
+        depth = result.metadata.get("depth", 0)
+        depth_counts[depth] = depth_counts.get(depth, 0) + 1
+    
+    for depth, count in sorted(depth_counts.items()):
+        print(f"📊 深度 {depth}: {count} 个页面")
+```
+
+### 错误处理与鲁棒性
+
+```python
+async def robust_deep_crawl():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BestFirstCrawlingStrategy(
+            max_depth=2,
+            max_pages=15,
+            url_scorer=KeywordRelevanceScorer(keywords=["guide", "tutorial"])
+        ),
+        stream=True,
+        page_timeout=30000  # 每页30秒超时
+    )
+    
+    successful_pages = []
+    failed_pages = []
+    
+    async with AsyncWebCrawler() as crawler:
+        async for result in await crawler.arun("https://docs.crawl4ai.com", config=config):
+            if result.success:
+                successful_pages.append(result)
+                depth = result.metadata.get("depth", 0)
+                score = result.metadata.get("score", 0)
+                print(f"✅ 深度 {depth} | 评分: {score:.2f} | {result.url}")
+            else:
+                failed_pages.append({
+                    'url': result.url,
+                    'error': result.error_message,
+                    'depth': result.metadata.get("depth", 0)
+                })
+                print(f"❌ 失败: {result.url} - {result.error_message}")
+    
+    print(f"📊 结果: {len(successful_pages)} 成功, {len(failed_pages)} 失败")
+    
+    # 按深度分析失败
+    if failed_pages:
+        failure_by_depth = {}
+        for failure in failed_pages:
+            depth = failure['depth']
+            failure_by_depth[depth] = failure_by_depth.get(depth, 0) + 1
+        
+        print("❌ 按深度统计失败:")
+        for depth, count in sorted(failure_by_depth.items()):
+            print(f"   深度 {depth}: {count} 次失败")
+```
+
+**📖 了解更多:** [深度爬取指南](https://docs.crawl4ai.com/core/deep-crawling/), [过滤器文档](https://docs.crawl4ai.com/core/content-selection/), [评分策略](https://docs.crawl4ai.com/advanced/advanced-features/)

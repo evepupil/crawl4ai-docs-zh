@@ -1,0 +1,1171 @@
+## 浏览器、爬虫与LLM配置
+
+用于控制浏览器行为、爬取操作、LLM提供商及解析爬取结果的核心配置类。
+
+### BrowserConfig - 浏览器环境设置
+
+```python
+from crawl4ai import BrowserConfig, AsyncWebCrawler
+
+# 基础浏览器配置
+browser_config = BrowserConfig(
+    browser_type="chromium",  # "chromium", "firefox", "webkit"
+    headless=True,           # False 表示可见浏览器（用于调试）
+    viewport_width=1280,
+    viewport_height=720,
+    verbose=True
+)
+
+# 高级浏览器设置（含代理和持久化）
+browser_config = BrowserConfig(
+    headless=False,
+    proxy="http://user:pass@proxy:8080",
+    use_persistent_context=True,
+    user_data_dir="./browser_data",
+    cookies=[
+        {"name": "session", "value": "abc123", "domain": "example.com"}
+    ],
+    headers={"Accept-Language": "en-US,en;q=0.9"},
+    user_agent="Mozilla/5.0 (X11; Linux x86_64) Chrome/116.0.0.0 Safari/537.36",
+    text_mode=True,  # 禁用图片以加速爬取
+    extra_args=["--disable-extensions", "--no-sandbox"]
+)
+
+async with AsyncWebCrawler(config=browser_config) as crawler:
+    result = await crawler.arun("https://example.com")
+```
+
+### CrawlerRunConfig - 爬取操作控制
+
+```python
+from crawl4ai import CrawlerRunConfig, CacheMode
+from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+from crawl4ai.content_filter_strategy import PruningContentFilter
+
+# 基础爬取配置
+run_config = CrawlerRunConfig(
+    cache_mode=CacheMode.BYPASS,
+    word_count_threshold=10,
+    excluded_tags=["nav", "footer", "script"],
+    exclude_external_links=True,
+    screenshot=True,
+    pdf=True
+)
+
+# 高级内容处理
+md_generator = DefaultMarkdownGenerator(
+    content_filter=PruningContentFilter(threshold=0.6),
+    options={"citations": True, "ignore_links": False}
+)
+
+run_config = CrawlerRunConfig(
+    # 内容处理
+    markdown_generator=md_generator,
+    css_selector="main.content",  # 聚焦特定内容
+    target_elements=[".article", ".post"],  # 多目标选择器
+    process_iframes=True,
+    remove_overlay_elements=True,
+    
+    # 页面交互
+    js_code=[
+        "window.scrollTo(0, document.body.scrollHeight);",
+        "document.querySelector('.load-more')?.click();"
+    ],
+    wait_for="css:.content-loaded",
+    wait_for_timeout=10000,
+    scan_full_page=True,
+    
+    # 会话管理
+    session_id="persistent_session",
+    
+    # 媒体处理
+    screenshot=True,
+    pdf=True,
+    capture_mhtml=True,
+    image_score_threshold=5,
+    
+    # 高级选项
+    simulate_user=True,
+    magic=True,  # 自动处理弹窗
+    verbose=True
+)
+```
+
+### CrawlerRunConfig 参数分类
+
+```python
+# 内容处理
+config = CrawlerRunConfig(
+    word_count_threshold=10,              # 每个内容块的最小词数
+    css_selector="main.article",          # 聚焦特定内容
+    target_elements=[".post", ".content"], # 多目标选择器
+    excluded_tags=["nav", "footer"],       # 移除这些标签
+    excluded_selector="#ads, .tracker",   # 按选择器移除
+    only_text=True,                       # 仅提取文本
+    keep_data_attributes=True,            # 保留 data-* 属性
+    remove_forms=True,                    # 移除所有表单
+    process_iframes=True                  # 包含 iframe 内容
+)
+
+# 页面导航与计时
+config = CrawlerRunConfig(
+    wait_until="networkidle",             # 等待条件
+    page_timeout=60000,                   # 60 秒超时
+    wait_for="css:.loaded",               # 等待特定元素
+    wait_for_images=True,                 # 等待图片加载
+    delay_before_return_html=0.5,         # 捕获前的最终延迟
+    semaphore_count=10                    # 最大并发操作数
+)
+
+# 页面交互
+config = CrawlerRunConfig(
+    js_code="document.querySelector('button').click();",
+    scan_full_page=True,                  # 自动滚动页面
+    scroll_delay=0.3,                     # 滚动间隔延迟
+    remove_overlay_elements=True,         # 移除弹窗/模态框
+    simulate_user=True,                   # 模拟人类行为
+    override_navigator=True,              # 重写导航器属性
+    magic=True                           # 自动处理常见模式
+)
+
+# 缓存与会话
+config = CrawlerRunConfig(
+    cache_mode=CacheMode.BYPASS,          # 缓存行为
+    session_id="my_session",              # 持久会话
+    shared_data={"context": "value"}      # 在钩子间共享数据
+)
+
+# 媒体与输出
+config = CrawlerRunConfig(
+    screenshot=True,                      # 捕获截图
+    pdf=True,                            # 生成 PDF
+    capture_mhtml=True,                  # 捕获 MHTML 归档
+    image_score_threshold=3,             # 过滤低质量图片
+    exclude_external_images=True         # 移除外部图片
+)
+
+# 链接与域名过滤
+config = CrawlerRunConfig(
+    exclude_external_links=True,         # 移除外部链接
+    exclude_social_media_links=True,     # 移除社交媒体链接
+    exclude_domains=["ads.com", "tracker.io"],  # 自定义域名过滤器
+    exclude_internal_links=False         # 保留内部链接
+)
+```
+
+### LLMConfig - 语言模型设置
+
+```python
+from crawl4ai import LLMConfig
+
+# OpenAI 配置
+llm_config = LLMConfig(
+    provider="openai/gpt-4o-mini",
+    api_token=os.getenv("OPENAI_API_KEY"),  # 或 "env:OPENAI_API_KEY"
+    temperature=0.1,
+    max_tokens=2000
+)
+
+# 本地模型（Ollama）
+llm_config = LLMConfig(
+    provider="ollama/llama3.3",
+    api_token=None,  # Ollama 无需 API 令牌
+    base_url="http://localhost:11434"  # 自定义端点
+)
+
+# Anthropic Claude
+llm_config = LLMConfig(
+    provider="anthropic/claude-3-5-sonnet-20240620",
+    api_token="env:ANTHROPIC_API_KEY",
+    max_tokens=4000
+)
+
+# Google Gemini
+llm_config = LLMConfig(
+    provider="gemini/gemini-1.5-pro",
+    api_token="env:GEMINI_API_KEY"
+)
+
+# Groq（快速推理）
+llm_config = LLMConfig(
+    provider="groq/llama3-70b-8192",
+    api_token="env:GROQ_API_KEY"
+)
+```
+
+### CrawlResult - 理解输出
+
+```python
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+
+async with AsyncWebCrawler() as crawler:
+    result = await crawler.arun("https://example.com", config=run_config)
+    
+    # 基础状态信息
+    print(f"成功: {result.success}")
+    print(f"状态: {result.status_code}")
+    print(f"URL: {result.url}")
+    
+    if not result.success:
+        print(f"错误: {result.error_message}")
+        return
+    
+    # HTML 内容变体
+    print(f"原始 HTML: {len(result.html)} 字符")
+    print(f"清理后 HTML: {len(result.cleaned_html or '')} 字符")
+    
+    # Markdown 输出（MarkdownGenerationResult）
+    if result.markdown:
+        print(f"原始 markdown: {len(result.markdown.raw_markdown)} 字符")
+        print(f"带引用的 markdown: {len(result.markdown.markdown_with_citations)} 字符")
+        
+        # 过滤后的内容（若使用了内容过滤器）
+        if result.markdown.fit_markdown:
+            print(f"适配 markdown: {len(result.markdown.fit_markdown)} 字符")
+            print(f"适配 HTML: {len(result.markdown.fit_html)} 字符")
+    
+    # 提取的结构化数据
+    if result.extracted_content:
+        import json
+        data = json.loads(result.extracted_content)
+        print(f"提取了 {len(data)} 项数据")
+    
+    # 媒体与链接
+    images = result.media.get("images", [])
+    print(f"找到 {len(images)} 张图片")
+    for img in images[:3]:  # 前 3 张图片
+        print(f"  {img.get('src')} (评分: {img.get('score', 0)})")
+    
+    internal_links = result.links.get("internal", [])
+    external_links = result.links.get("external", [])
+    print(f"链接: {len(internal_links)} 内部, {len(external_links)} 外部")
+    
+    # 生成的文件
+    if result.screenshot:
+        print(f"截图已捕获: {len(result.screenshot)} 字符 (base64)")
+        # 保存截图
+        import base64
+        with open("page.png", "wb") as f:
+            f.write(base64.b64decode(result.screenshot))
+    
+    if result.pdf:
+        print(f"PDF 已生成: {len(result.pdf)} 字节")
+        with open("page.pdf", "wb") as f:
+            f.write(result.pdf)
+    
+    if result.mhtml:
+        print(f"MHTML 已捕获: {len(result.mhtml)} 字符")
+        with open("page.mhtml", "w", encoding="utf-8") as f:
+            f.write(result.mhtml)
+    
+    # SSL 证书信息
+    if result.ssl_certificate:
+        print(f"SSL 颁发者: {result.ssl_certificate.issuer}")
+        print(f"有效期至: {result.ssl_certificate.valid_until}")
+    
+    # 网络和控制台数据（若已捕获）
+    if result.network_requests:
+        requests = [r for r in result.network_requests if r.get("event_type") == "request"]
+        print(f"网络请求已捕获: {len(requests)}")
+    
+    if result.console_messages:
+        errors = [m for m in result.console_messages if m.get("type") == "error"]
+        print(f"控制台消息: {len(result.console_messages)} ({len(errors)} 错误)")
+    
+    # 会话和元数据
+    if result.session_id:
+        print(f"会话 ID: {result.session_id}")
+    
+    if result.metadata:
+        print(f"元数据: {result.metadata.get('title', '无标题')}")
+```
+
+### 配置助手与最佳实践
+
+```python
+# 克隆配置以创建变体
+base_config = CrawlerRunConfig(
+    cache_mode=CacheMode.ENABLED,
+    word_count_threshold=200,
+    verbose=True
+)
+
+# 创建流式版本
+stream_config = base_config.clone(
+    stream=True,
+    cache_mode=CacheMode.BYPASS
+)
+
+# 创建调试版本
+debug_config = base_config.clone(
+    headless=False,
+    page_timeout=120000,
+    verbose=True
+)
+
+# 序列化/反序列化配置
+config_dict = base_config.dump()  # 转换为字典
+restored_config = CrawlerRunConfig.load(config_dict)  # 从字典恢复
+
+# 浏览器配置管理
+browser_config = BrowserConfig(headless=True, text_mode=True)
+browser_dict = browser_config.to_dict()
+cloned_browser = browser_config.clone(headless=False, verbose=True)
+```
+
+### 常见配置模式
+
+```python
+# 快速纯文本爬取
+fast_config = CrawlerRunConfig(
+    cache_mode=CacheMode.ENABLED,
+    text_mode=True,
+    exclude_external_links=True,
+    exclude_external_images=True,
+    word_count_threshold=50
+)
+
+# 全面数据提取
+comprehensive_config = CrawlerRunConfig(
+    process_iframes=True,
+    scan_full_page=True,
+    wait_for_images=True,
+    screenshot=True,
+    capture_network_requests=True,
+    capture_console_messages=True,
+    magic=True
+)
+
+# 隐身爬取
+stealth_config = CrawlerRunConfig(
+    simulate_user=True,
+    override_navigator=True,
+    mean_delay=2.0,
+    max_range=1.0,
+    user_agent_mode="random"
+)
+```
+
+### 高级配置功能
+
+#### 用户代理管理与反机器人检测规避
+
+```python
+from crawl4ai import CrawlerRunConfig
+
+# 随机用户代理生成
+config = CrawlerRunConfig(
+    user_agent_mode="random",
+    user_agent_generator_config={
+        "platform": "windows",  # "windows", "macos", "linux", "android", "ios"
+        "browser": "chrome",    # "chrome", "firefox", "safari", "edge"
+        "device_type": "desktop"  # "desktop", "mobile", "tablet"
+    }
+)
+
+# 自定义用户代理与隐身功能
+config = CrawlerRunConfig(
+    user_agent="Mozilla/极速浏览 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    simulate_user=True,      # 模拟人类鼠标移动
+    override_navigator=True,  # 重写导航器属性
+    mean_delay=1.5,          # 操作间随机延迟
+   极速浏览_range=2.0
+)
+
+# 组合反检测方法
+stealth_config = CrawlerRunConfig(
+    user_agent_mode="random",
+    simulate_user=True,
+    override_navigator=True,
+    magic=True,  # 自动处理常见机器人检测模式
+    delay_before_return_html=2.0
+)
+```
+
+#### 使用 ProxyConfig 的代理配置
+
+```python
+from crawl4ai import CrawlerRunConfig, ProxyConfig, ProxyRotationStrategy
+
+# 单代理配置
+proxy极速浏览 = ProxyConfig(
+    server="http://proxy.example.com:8080",
+    username="proxy_user",
+    password="proxy_pass"
+)
+
+# 从代理字符串格式创建
+proxy_config = ProxyConfig.from_string("192.168.1.100:8080:username:password")
+
+# 多代理轮换
+proxies = [
+    ProxyConfig(server="http://proxy1.com:8080", username="user1", password="pass1"),
+    ProxyConfig(server="http://proxy2.com:极速浏览", username="user2", password="pass2"),
+    ProxyConfig(server="http://proxy3.com:8080", username="user3", password="pass3")
+]
+
+rotation_strategy = ProxyRotationStrategy(
+    proxies=proxies,
+    rotation_method="round_robin"  # 或 "random", "least_used"
+)
+
+config = CrawlerRunConfig(
+    proxy_config=proxy_config,
+    proxy_rotation_strategy=rotation_strategy
+)
+
+# 从环境变量加载代理
+proxies_from_env = ProxyConfig.from_env("MY_PROXIES")  # 逗号分隔的代理字符串
+```
+
+#### 内容选择：css_selector 与 target_elements
+
+```python
+from crawl4ai import CrawlerRunConfig
+
+# css_selector：在顶层提取 HTML，影响整个处理过程
+config = CrawlerRunConfig(
+    css_selector="main.article, .content-area",  # 可以是选择器列表
+    # 其他所有内容（markdown、提取、链接）仅在此 HTML 子集上工作
+)
+
+# target_elements：在已处理的 HTML 中聚焦提取
+config = CrawlerRunConfig(
+    css_selector="body",  # 首先提取整个 body
+    target_elements=[     # 然后聚焦于这些元素进行提取
+        ".article-content",
+        ".post-body", 
+        ".main-text"
+    ],
+    # 链接、媒体来自整个 body，但 markdown/提取仅来自 target_elements
+)
+
+# 分层内容选择
+config = Crawler极速浏览(
+    css_selector=["#main-content", ".article-wrapper"],  # 顶层提取
+    target_elements=[                                     # 用于处理的子集
+        ".article-title",
+        ".article-body", 
+        ".article-metadata"
+    ],
+    excluded_selector="#sidebar, .ads, .comments"  # 从选择中移除这些
+)
+```
+
+#### 高级 wait_for 条件
+
+```python
+from crawl4ai import CrawlerRunConfig
+
+# CSS 选择器等待
+config = CrawlerRunConfig(
+    wait_for="css:.content-loaded",  # 等待元素出现
+    wait_for_timeout=15000
+)
+
+# JavaScript 布尔表达式等待
+config = CrawlerRunConfig(
+    wait_for="js:() => window.dataLoaded === true",  # 自定义 JS 条件
+    wait_for_timeout=20000
+)
+
+# 复杂 JavaScript 条件
+config = CrawlerRunConfig(
+    wait_for="js:() => document.querySelectorAll('.item').length >= 10",
+    js_code=[
+        "document.querySelector('.load-more')?.click();",
+        "window.scrollTo(0, document.body.scrollHeight);"
+    ]
+)
+
+# 多条件 JavaScript
+config = CrawlerRunConfig(
+    wait_for="js:() => !document.querySelector('.loading') && document.querySelector('.results')",
+    page_time极速浏览=30000
+)
+```
+
+#### 多步骤爬取的会话管理
+
+```python
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+
+# 跨多个 arun() 调用的持久会话
+async def multi_step_crawling():
+    async with AsyncWebCrawler() as crawler:
+        # 步骤 1：登录页面
+        login_config = CrawlerRunConfig(
+            session_id="user_session",  # 创建持久会话
+            js_code="document.querySelector('#username').value = 'user'; document.querySelector('#password').value = 'pass'; document.querySelector('#login').click();",
+            wait_for="css:.dashboard",
+            cache_mode=CacheMode.BYPASS
+        )
+        
+        result1 = await crawler.arun("https://example.com/login", config=login_config)
+        
+        # 步骤 2：导航到受保护区域（重用同一浏览器页面）
+        nav_config = CrawlerRunConfig(
+            session_id="user_session",  # 相同会话 = 相同浏览器页面
+            js_only=True,  # 无页面重载，仅 JS 导航
+            js_code="window.location.href = '/dashboard/data';",
+            wait_for="css:.data-table"
+        )
+        
+        result2 = await crawler.arun("https://example.com/dashboard/data", config=nav_config)
+        
+        # 步骤 3：从多页面提取数据
+        for page in range(1, 6):
+            page_config = CrawlerRunConfig(
+                session_id="user_session",
+                js_only=True,
+                js_code=f"document.querySelector('.page-{page}').click();",
+                wait_for=f"js:() => document.querySelector('.page-{page}').classList.contains('active')"
+            )
+            
+            result = await crawler.arun(f"https://example.com/data/page/{page}", config=page_config)
+            print(f"页面 {page} 数据已提取: {len(result.extracted_content)}")
+        
+        # 重要：完成后终止会话
+        await crawler.kill_session("user_session")
+
+# 带步骤间共享数据的会话
+async def session_with_shared_data():
+    shared_context = {"user_id": "12345", "preferences": {"theme": "dark"}}
+    
+    config = CrawlerRunConfig(
+        session_id="persistent_session",
+        shared_data=shared_context,  # 在所有会话调用中可用
+        js_code="console.log('用户 ID:', window.sharedData.user_id);"
+    )
+```
+
+#### 基于身份的爬取参数
+
+```python
+from crawl4ai import CrawlerRunConfig, GeolocationConfig
+
+# 区域设置和时区模拟
+config = CrawlerRunConfig(
+    locale="en-US",                    # 浏览器语言偏好
+    timezone_id="America/New_York",    # 时区设置
+    user_agent_mode="random",
+    user_agent_generator_config={
+        "platform": "windows",
+        "locale": "en-US"
+    }
+)
+
+# 地理位置模拟
+geo_config = GeolocationConfig(
+    latitude=40.7128,   # 纽约坐标
+    longitude=-74.0060,
+    accuracy=100.0
+)
+
+config = CrawlerRunConfig(
+    geolocation=geo_config,
+    locale="en-US",
+    timezone_id="America/New_York"
+)
+
+# 完整身份模拟
+identity_config = CrawlerRunConfig(
+    # 位置身份
+    locale="fr-FR",
+    timezone_id="Europe/Paris", 
+    geolocation=GeolocationConfig(latitude=48.8566, longitude=2.3522),
+    
+    # 浏览器身份
+    user_agent_mode="random",
+    user_agent_generator_config={
+       极速浏览: "windows",
+        "locale": "fr-FR",
+        "browser": "chrome"
+    },
+    
+    # 行为身份
+    simulate_user=True,
+    override_navigator=True,
+    mean_delay=2.0,
+    max_range=1.5
+)
+```
+
+#### 简化导入模式
+
+```python
+# 几乎所有内容都来自 crawl4ai 主包
+from crawl4ai import (
+    AsyncWebCrawler,
+    BrowserConfig, 
+    CrawlerRunConfig,
+    LLMConfig,
+    CacheMode,
+    ProxyConfig,
+    GeolocationConfig
+)
+
+# 专用策略（仍来自 crawl4ai）
+from crawl4ai import (
+    JsonCssExtractionStrategy,
+    LLMExtractionStrategy,
+    DefaultMarkdownGenerator,
+    PruningContentFilter,
+    RegexChunking
+)
+
+# 简化导入的完整示例
+async def example_crawl():
+    browser_config = BrowserConfig(headless=True)
+    
+    run_config = CrawlerRunConfig(
+        user_agent_mode="random",
+        proxy_config=ProxyConfig.from_string("192.168.1.1:8080:user:pass"),
+        css_selector极速浏览,
+        target_elements=[".article", ".post"],
+        wait_for="js极速浏览 document.querySelector('.loaded')",
+        session_id="my_session",
+        simulate_user=True
+    )
+    
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        result = await crawler.arun("https://example.com", config=run_config)
+        return result
+```
+
+## 高级功能
+
+全面指南，涵盖高级爬取能力，包括文件处理、身份验证、动态内容、监控和会话管理。
+
+### 文件下载处理
+
+```python
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+import os
+
+# 启用下载并自定义路径
+downloads_path = os.path.join(os.getcwd(), "my_downloads")
+os.makedirs(downloads_path, exist_ok=True)
+
+browser_config = BrowserConfig(
+    accept_downloads=True,
+    downloads_path=downloads_path
+)
+
+# 使用 JavaScript 触发下载
+async def download_files():
+    async with AsyncWebCrawler(config=browser_config极速浏览 crawler:
+        config = CrawlerRunConfig(
+            js_code="""
+                // 点击下载链接
+                const downloadLinks = document.querySelectorAll('a[href$=".pdf"]');
+                for (const link of downloadLinks) {
+                    link.click();
+                    await new Promise(r => setTimeout(r, 2000));  // 下载间延迟
+                }
+            """,
+            wait_for=5  # 等待下载开始
+        )
+        
+        result = await crawler.arun("https://example.com/downloads", config=config)
+        
+        if result.downloaded_files:
+            print("已下载文件:")
+            for file_path in result.downloaded_files:
+                print(f"- {file_path} ({os.path.getsize(file_path)} 字节)")
+```
+
+### 钩子与身份验证
+
+```python
+from crawl4ai import Async极速浏览 BrowserConfig, CrawlerRunConfig
+from playwright.async_api import Page, BrowserContext
+
+async def advanced_crawler_with_hooks():
+    browser_config = BrowserConfig(headless=True, verbose=True)
+    crawler = AsyncWebCrawler(config=browser_config)
+
+    # 不同阶段的钩子函数
+    async def on_browser_created(browser, **kwargs):
+        print("[HOOK] 浏览器创建成功")
+        return browser
+
+    async def on_page_context_created(page: Page, context: BrowserContext, **kwargs):
+        print("[HOOK] 设置页面和上下文")
+        
+        # 拦截图片以加速爬取
+        async def route_filter(route):
+            if route.request.resource_type == "image":
+                await route.abort()
+            else:
+                await route.continue_()
+        
+        await context.route("**", route_filter)
+        
+        # 如果需要，模拟登录
+        # await page.goto("https://example.com/login")
+        # await page.fill("input[name='username']", "testuser")
+        # await page.fill("input[name='password']", "password123")
+        # await page.click("button[type='submit']")
+        
+        await page.set_viewport_size({"width": 1080, "height": 600})
+        return page
+
+    async def before_goto(page: Page, context: BrowserContext, url: str, **kwargs):
+        print(f"[HOOK] 即将导航至: {url}")
+        await page.set_extra_http_headers({"Custom-Header": "my-value"})
+        return page
+
+    async def after_goto(page: Page, context: BrowserContext, url: str, response, **kwargs):
+        print(f"[极速浏览] 成功加载: {url}")
+        try:
+            await page.wait_for_selector('.content', timeout=1000)
+            print("[HOOK] 找到内容!")
+        except:
+            print("[HOOK] 未找到内容，继续")
+        return page
+
+    async def before_retrieve_html(page: Page, context: BrowserContext, **kwargs):
+        print("[HOOK] HTML 检索前的最终操作")
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+        return page
+
+    # 附加钩子
+    crawler.crawler_strategy.set_hook("on_browser_created", on_browser_created)
+    crawler.crawler_strategy.set_hook("on_page_context_created", on_page_context_created)
+    crawler.crawler_strategy.set_hook("before_goto", before_goto)
+    crawler.crawler_strategy.set_hook("after_goto", after_goto)
+    crawler.crawler_strategy.set_hook("before_retrieve_html", before_retrieve_html)
+
+    await crawler.start()
+    
+    config = CrawlerRunConfig()
+    result = await crawler.arun("https://example.com", config=config)
+    
+    if result.success:
+        print(f"爬取成功: {len(result.html)} 字符")
+    
+    await crawler.close()
+```
+
+### 懒加载与动态内容
+
+```python
+# 处理懒加载图片和无限滚动
+async def handle_lazy_loading():
+    config = CrawlerRunConfig(
+        # 等待图片完全加载
+        wait_for_images=True,
+        
+        # 自动滚动整个页面以触发懒加载
+        scan_full_page=True,
+        scroll_delay=0.5,  # 滚动步骤间延迟
+        
+        # 自定义懒加载的 JavaScript
+        js_code="""
+            // 滚动并等待内容加载
+            window.scrollTo(0, document.body.scrollHeight);
+            
+            // 点击“加载更多”（如果可用）
+            const loadMoreBtn = document.querySelector('.load-more');
+            if (loadMoreBtn) {
+                loadMoreBtn.click();
+            }
+        """,
+        
+        # 等待特定内容出现
+        wait_for="css:.lazy-content:nth-child(20)",  # 等待 20 项
+        
+        # 排除外部图片以聚焦主要内容
+        exclude_external_images=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com/gallery", config=config)
+        
+        if result.success:
+            images = result.media.get("images", [])
+            print(f"懒加载后加载了 {len(images)} 张图片")
+            for img in images[:3]:
+                print(f"- {img.get('src')} (评分: {img.get('score', 'N/A')})")
+```
+
+### 网络与控制台监控
+
+```python
+# 捕获所有网络请求和控制台消息以进行调试
+async def monitor_network_and_console():
+    config = CrawlerRunConfig(
+        capture_network_requests=True,
+        capture_console_messages=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.ar极速浏览("https://example.com", config=config)
+        
+        if result.success:
+            # 分析网络请求
+            if result.network_requests:
+                requests = [r for r in result.network_requests if r.get("event_type") == "request"]
+                responses = [r for r in result.network_requests if r.get("event_type") == "response"]
+                failures = [极速浏览 r in result.network_requests if r.get("event_type") == "request_failed"]
+                
+                print(f"网络活动: {len(requests)} 请求, {len(responses)} 响应, {len(failures)} 失败")
+                
+                # 查找 API 调用
+                api_calls = [r for r in requests if "api" in r.get("url", "")]
+                print(f"检测到 API 调用: {len(api_calls)}")
+                
+                # 显示失败请求
+                for failure in failures[:3]:
+                    print(f"失败: {failure.get('url')} - {failure.get('failure_text')}")
+            
+            # 分析控制台消息
+            if result.console_messages:
+                message_types = {}
+                for msg in result.console_messages:
+                    msg_type = msg.get("type", "unknown")
+                    message_types[msg_type] = message_types.get(msg_type, 0) + 1
+                
+                print(f"控制台消息: {message_types}")
+                
+                # 显示错误
+                errors = [msg for msg in result.console_messages if msg.get("type") == "error"]
+                for error in errors[:2]:
+                    print(f"JS 错误: {error.get('text', '')[:100]}")
+```
+
+### 多步骤工作流的会话管理
+
+```python
+# 在复杂工作流的多个请求间维护状态
+async def multi_step_session_workflow():
+    session_id = "workflow_session"
+    
+    async with AsyncWebCrawler() as crawler:
+        # 步骤 1：初始页面加载
+        config1 = CrawlerRunConfig(
+            session_id=session_id,
+            wait_for="css:.content-loaded"
+        )
+        
+        result1 = await crawler.arun("https://example.com/step1", config=config1)
+        print("步骤 1 完成")
+        
+        # 步骤 2：导航和交互（同一浏览器标签页）
+        config2 = CrawlerRunConfig(
+            session_id=session极速浏览,
+            js_only=True,  # 不重载页面，仅运行 JS
+            js_code="""
+                document.querySelector('#next-button').click();
+            """,
+            wait_for="css:.step2-content"
+        )
+        
+        result2 = await crawler.arun("https://example.com/极速浏览", config=config2)
+        print("步骤 2 完成")
+        
+        # 步骤 3：表单提交
+        config3 = CrawlerRunConfig(
+            session_id=session_id,
+            js_only=True,
+            js_code="""
+                document.querySelector('#form-field').value = 'test data';
+                document.querySelector('#submit-btn').click();
+            """,
+            wait_for="css:.results"
+        )
+        
+        result3 = await crawler.arun("https://example.com/submit", config=config3)
+        print("步骤 3 完成")
+        
+        # 清理会话
+        await crawler.crawler_strategy.kill_session(session_id)
+
+# 高级 GitHub 提交分页示例
+async def github_commits_pagination():
+    session_id = "github_session"
+    all_commits = []
+    
+    async with AsyncWebCrawler() as crawler:
+        for page in range(3):
+            if page == 0:
+                # 初始加载
+                config = CrawlerRunConfig(
+                    session_id=session_id,
+                    wait_for="js:() => document.querySelectorAll('li.Box-sc-g0xbh4-0').length > 0"
+                )
+            else:
+                # 导航到下一页
+                config = CrawlerRunConfig(
+                    session_id=session_id,
+                    js_only=True,
+                    js_code='document.querySelector(\'a[data-testid="pagination-next-button"]\').click();',
+                    wait_for="js:() => document.querySelectorAll('li.Box-sc-g0xbh4-0').length > 极速浏览"
+                )
+            
+            result = await crawler.arun(
+                "https://github.com/microsoft/TypeScript/commits/main",
+                config=config
+            )
+            
+            if result.success:
+                commit_count = result.cleaned_html.count('li.Box-sc-g0xbh4-0')
+                print(f"页面 {page + 1}: 找到 {commit_count} 条提交")
+        
+        await crawler.crawler_strategy.kill_session(session_id)
+```
+
+### SSL 证书分析
+
+```python
+# 获取并分析 SSL 证书
+async def analyze_ssl_certificates():
+    config = CrawlerRunConfig(
+        fetch_ssl_certificate=True
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com", config=config)
+        
+        if result.success and result.ssl_certificate:
+            cert = result.ssl_certificate
+            
+            # 基础证书信息
+            print(f"颁发者: {cert.issuer.get('CN', '未知')}")
+            print(f"主题: {cert.subject.get('CN', '未知')}")
+            print(f"有效期从: {cert.valid_from}")
+            print(f"有效期至: {cert.valid_until}")
+            print(f"指纹: {cert.fingerprint}")
+            
+            # 以不同格式导出证书
+            import os
+            os.makedirs("certificates", exist_ok=True)
+            
+            cert.to_json("certificates/cert.json")
+            cert.to_pem("certificates/cert.pem")
+            cert.to_der("certificates/cert.der")
+            
+            print("证书已以多种格式导出")
+```
+
+### 高级页面交互
+
+```python
+# 带动态内容的复杂页面交互
+async def advanced_page_interaction():
+    async with AsyncWebCrawler() as crawler:
+        # 带等待的多步骤交互
+        config = CrawlerRunConfig(
+            js_code=[
+                # 步骤 1：滚动以加载内容
+                "window.scroll极速浏览 document.body.scrollHeight);",
+                
+                # 步骤 2：等待并点击加载更多
+                """
+                (async () => {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    const loadMore = document.querySelector('.load-more');
+                    if (loadMore) loadMore.click();
+                })();
+                """
+            ],
+            
+            # 等待新内容出现
+            wait_for="js:() => document.querySelectorAll('.item').length > 20",
+            
+            # 额外计时控制
+            page_timeout=60000,  # 60 秒超时
+            delay_before_return_html=2.0,  # 最终捕获前等待
+            
+            # 自动处理覆盖层
+            remove_overlay_elements=True,
+            magic=True,  # 自动处理常见弹窗模式
+            
+            # 模拟人类行为
+            simulate_user=True,
+            override_navigator=True
+        )
+        
+        result = await crawler.arun("https://example.com/dynamic", config=config)
+        
+        if result.success:
+            print(f"交互式爬取完成: {len(result.cleaned_html)} 字符")
+
+# 表单交互示例
+async def form_interaction_example():
+    config = CrawlerRunConfig(
+        js_code="""
+            // 填写搜索表单
+            document.querySelector('#search-input').value = 'machine learning';
+            document.querySelector('#category-select').value = 'technology';
+            document.querySelector('#search-form').submit();
+        """,
+        wait_for="css:.search-results",
+        session_id="search_session"
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com/search", config=config)
+        print("搜索完成，结果已加载")
+```
+
+### 本地文件与原始 HTML 处理
+
+```python
+# 处理不同输入类型：URL、本地文件、原始 HTML
+async def handle_different_inputs():
+    async with AsyncWebCrawler() as crawler:
+        # 1. 常规网页 URL
+        result1 = await crawler.arun("https://example.com")
+        
+        # 2. 本地 HTML 文件
+        local_file_path = "/path/to/file.html"
+        result2 = await crawler.arun(f"file://{local_file_path}")
+        
+        # 3. 原始 HTML 内容
+        raw_html = "<html><body><h1>测试内容</h1><p>示例文本</p></body></html>"
+        result3 = await crawler.arun(f"raw:{raw_html}")
+        
+        # 全部返回相同的 CrawlResult 结构
+        for i, result in enumerate([result1, result2, result3], 1):
+            if result.success:
+                print(f"输入 {i}: {len(result.markdown)} 字符的 markdown")
+
+# 保存并重新处理 HTML 示例
+async def save_and_reprocess():
+    async with AsyncWebCrawler() as crawler:
+        # 原始爬取
+        result = await crawler.arun("https://example.com")
+        
+        if result.success:
+            # 保存 HTML 到文件
+            with open("saved_page.html", "w", encoding="utf-8") as f:
+                f.write(result.html)
+            
+            # 从文件重新处理
+            file_result = await crawler.arun("file://./saved_page.html")
+            
+            # 作为原始 HTML 处理
+            raw_result = await crawler.arun(f"raw:{result.html}")
+            
+            # 验证一致性
+            assert len(result.markdown) == len(file_result.markdown) == len(raw_result.markdown)
+            print("✅ 所有处理方法产生了一致的结果")
+```
+
+### 高级链接与媒体处理
+
+```python
+# 带过滤的全面链接和媒体提取
+async def advanced_link_media_handling():
+    config = CrawlerRunConfig(
+        # 链接过滤
+        exclude_external_links=False,  # 保留外部链接以进行分析
+        exclude_social_media_links=True,
+        exclude_domains=["ads.com", "tracker.io", "spammy.net"],
+        
+        # 媒体处理
+        exclude_external_images=True,
+        image_score_threshold=5,  # 仅高质量图片
+        table_score_threshold=7,  # 仅结构良好的表格
+        wait_for_images=True,
+        
+        # 捕获额外格式
+        screenshot=True,
+        pdf=True,
+        capture_mhtml=True  # 完整页面归档
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun("https://example.com", config=config)
+        
+        if result.success:
+            # 分析链接
+            internal_links = result.links.get("internal", [])
+            external_links = result.links.get("external", [])
+            print(f"链接: {极速浏览(internal_links)} 内部, {len(external_links)} 外部")
+            
+            # 分析媒体
+            images = result.media.get("images", [])
+            tables = result.media.get("tables", [])
+            print(f"媒体: {len(images)} 图片, {len(tables)} 表格")
+            
+            # 仅高质量图片
+            quality_images = [img for img in images if img.get("score", 0) >= 5]
+            print(f"高质量图片: {len(quality_images)}")
+            
+            # 表格分析
+            for i, table in enumerate(tables[:2]):
+                print(f"表格 {i+1}: {len(table.get('headers', []))} 列, {len(table.get('rows', []))} 行")
+            
+            # 保存捕获的文件
+            if result.screenshot:
+                import base64
+                with open("page_screenshot.png", "wb") as f:
+                    f.write(base64.b64decode(result.screenshot))
+            
+            if result.pdf:
+                with open("page.pdf", "wb") as f:
+                    f.write(result.pdf)
+            
+            if result.mhtml:
+                with open("page_archive.mhtml", "w", encoding="utf-8")极速浏览:
+                    f.write(result.mhtml)
+            
+            print("额外格式已保存: 截图、PDF、MHTML 归档")
+```
+
+### 性能与资源管理
+
+```python
+# 为大规模爬取优化性能
+async def performance_optimized_crawling():
+    # 轻量级浏览器配置
+    browser_config = BrowserConfig(
+        headless=True,
+        text_mode=True,  # 禁用图片以加速
+        light_mode=True,  # 减少后台功能
+        extra_args=["--disable-extensions", "--no-sandbox"]
+    )
+    
+    # 高效爬取配置
+    config = CrawlerRunConfig(
+        # 内容过滤以提速
+        excluded_tags=["script", "style", "nav", "footer"],
+        exclude_external_links=True,
+        exclude_all_images=True,  # 移除所有图片以获得最大速度
+        word_count_threshold=50,
+        
+        # 计时优化
+        page_timeout=30000,  # 更快超时
+        delay_before_return_html=0.1,
+        
+        # 资源监控
+        capture_network_requests=False,  # 除非需要，否则禁用
+        capture_console_messages=False,
+        
+        # 重复 URL 的缓存
+        cache_mode=CacheMode.ENABLED
+    )
+    
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        urls = ["https://example.com/page1", "https://example.com/page2", "https://example.com/page3"]
+        
+        # 高效批处理
+        batch_config = config.clone(
+            stream=True,  # 流式传输完成的结果
+            semaphore_count=3  # 控制并发
+        )
+        
+        async for result in await crawler.arun_many(urls, config=batch_config):
+            if result.success:
+                print(f"✅ {result.url}: {len(result.markdown)} 字符")
+            else:
+                print(f"❌ {result.url}: {result.error_message}")
+```
+
+
+**📖 了解更多:** [完整参数参考](https://docs.crawl4ai.com/api/parameters/), [内容过滤](https://docs.crawl4ai.com/core/markdown-generation/), [会话管理](https://docs.crawl4ai.com/advanced/session-management/), [网络捕获](https://docs.crawl4ai.com/advanced/network-console-capture/)
+
+**📖 了解更多:** [钩子与身份验证](https://docs.crawl4ai.com/advanced/hooks-auth/), [会话管理](https://docs.crawl4ai.com/advanced/session-management/), [网络监控](https://docs.crawl4ai.com/advanced/network-console-capture/), [页面交互](https://docs.crawl4ai.com/core/page-interaction/), [文件下载](https://docs.crawl4ai.com/advanced/file-downloading/)

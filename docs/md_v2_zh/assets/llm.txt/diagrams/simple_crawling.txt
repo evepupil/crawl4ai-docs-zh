@@ -1,0 +1,411 @@
+## 简单爬虫工作流与数据流
+
+基础网络爬虫操作、配置模式和结果处理流程的可视化呈现。
+
+### 基本爬虫时序
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Crawler as AsyncWebCrawler
+    participant Browser as Browser Instance
+    participant Page as Web Page
+    participant Processor as Content Processor
+    
+    User->>Crawler: Create with BrowserConfig
+    Crawler->>Browser: Launch browser instance
+    Browser-->>Crawler: Browser ready
+    
+    User->>Crawler: arun(url, CrawlerRunConfig)
+    Crawler->>Browser: Create new page/context
+    Browser->>Page: Navigate to URL
+    Page-->>Browser: Page loaded
+    
+    Browser->>Processor: Extract raw HTML
+    Processor->>Processor: Clean HTML
+    Processor->>Processor: Generate markdown
+    Processor->>Processor: Extract media/links
+    Processor-->>Crawler: CrawlResult created
+    
+    Crawler-->>User: Return CrawlResult
+    
+    Note over User,Processor: All processing happens asynchronously
+```
+
+### 爬虫配置流程
+
+```mermaid
+flowchart TD
+    A[开始爬取] --> B{浏览器配置已设置?}
+    
+    B -->|否| B1[使用默认 BrowserConfig]
+    B -->|是| B2[自定义 BrowserConfig]
+    
+    B1 --> C[启动浏览器]
+    B2 --> C
+    
+    C --> D{爬虫运行配置已设置?}
+    
+    D -->|否| D1[使用默认 CrawlerRunConfig]
+    D -->|是| D2[自定义 CrawlerRunConfig]
+    
+    D1 --> E[导航到 URL]
+    D2 --> E
+    
+    E --> F{页面加载成功?}
+    F -->|否| F1[返回错误结果]
+    F -->|是| G[应用内容过滤器]
+    
+    G --> G1{excluded_tags 已设置?}
+    G1 -->|是| G2[移除指定标签]
+    G1 -->|否| G3[保留所有标签]
+    G2 --> G4{css_selector 已设置?}
+    G3 --> G4
+    
+    G4 -->|是| G5[提取选定元素]
+    G4 -->|否| G6[处理完整页面]
+    G5 --> H[生成 Markdown]
+    G6 --> H
+    
+    H --> H1{markdown_generator 已设置?}
+    H1 -->|是| H2[使用自定义生成器]
+    H1 -->|否| H3[使用默认生成器]
+    H2 --> I[提取媒体和链接]
+    H3 --> I
+    
+    I --> I1{process_iframes?}
+    I1 -->|是| I2[包含 iframe 内容]
+    I1 -->|否| I3[跳过 iframes]
+    I2 --> J[创建 CrawlResult]
+    I3 --> J
+    
+    J --> K[返回结果]
+    
+    style A fill:#e1f5fe
+    style K fill:#c8e6c9
+    style F1 fill:#ffcdd2
+```
+
+### CrawlResult 数据结构
+
+```mermaid
+graph TB
+    subgraph "CrawlResult 对象"
+        A[CrawlResult] --> B[基础信息]
+        A --> C[内容变体]
+        A --> D[提取数据]
+        A --> E[媒体资源]
+        A --> F[可选输出]
+        
+        B --> B1[url: 最终 URL]
+        B --> B2[success: 布尔值]
+        B --> B3[status_code: HTTP 状态码]
+        B --> B4[error_message: 错误详情]
+        
+        C --> C1[html: 原始 HTML]
+        C --> C2[cleaned_html: 清理后 HTML]
+        C --> C3[markdown: MarkdownGenerationResult]
+        
+        C3 --> C3A[raw_markdown: 基础转换]
+        C3 --> C3B[markdown_with_citations: 带参考文献]
+        C3 --> C3C[fit_markdown: 过滤内容]
+        C3 --> C3D[references_markdown: 引用列表]
+        
+        D --> D1[links: 内部/外部链接]
+        D --> D2[media: 图片/视频/音频]
+        D --> D3[metadata: 页面信息]
+        D --> D4[extracted_content: JSON 数据]
+        D --> D5[tables: 结构化表格数据]
+        
+        E --> E1[screenshot: Base64 图片]
+        E --> E2[pdf: PDF 字节]
+        E --> E3[mhtml: 归档文件]
+        E --> E4[downloaded_files: 文件路径]
+        
+        F --> F1[session_id: 浏览器会话]
+        F --> F2[ssl_certificate: 安全信息]
+        F --> F3[response_headers: HTTP 头]
+        F --> F4[network_requests: 流量日志]
+        F --> F5[console_messages: 浏览器日志]
+    end
+    
+    style A fill:#e3f2fd
+    style C3 fill:#f3e5f5
+    style极D5 fill:#e8f5e8
+```
+
+### 内容处理流水线
+
+```mermaid
+flowchart LR
+    subgraph "输入源"
+        A1[网页 URL]
+        A2[原始 HTML]
+        A3[本地文件]
+    end
+    
+    A1 --> B[浏览器导航]
+    A2 --> C[直接处理]
+    A3 --> C
+    
+    B --> D[原始 HTML 捕获]
+    C --> D
+    
+    D --> E{内容过滤}
+    
+    E --> E1[移除脚本/样式]
+   极 E --> E2[应用 excluded_tags]
+    E --> E3[应用 css_selector]
+    E --> E4[移除覆盖元素]
+    
+    E1 --> F[清理后 HTML]
+    E2 --> F
+    E3 --> F
+    E4 --> F
+    
+    F --> G{Markdown 生成}
+    
+    G --> G1[HTML 转 Markdown]
+    G --> G2[应用内容过滤器]
+    G --> G3[生成引用]
+    
+    G1 --> H[MarkdownGenerationResult]
+    G2 --> H
+    G3 --> H
+    
+    F --> I{媒体提取}
+    I --> I1[查找图片]
+    I --> I2[查找视频/音频]
+    I --> I3[评分相关性]
+    I1 --> J[媒体字典]
+    I2 --> J
+    I3 --> J
+    
+    F --> K{链接提取}
+    K --> K1[内部链接]
+    K --> K2[外部链接]
+    K --> K3[应用链接过滤器]
+    K1 --> L[链接字典]
+    K2 --> L
+    K3 --> L
+    
+    H --> M[最终 CrawlResult]
+    J --> M
+    L --> M
+    
+    style D fill:#e3f2fd
+    style F fill:#f3e5f5
+    style H fill:#e8f极5e8
+    style M fill:#c8e6c9
+```
+
+### 表格提取工作流
+
+```mermaid
+stateDiagram-v2
+    [*] --> DetectTables
+    
+    DetectTables --> ScoreTables: 查找表格元素
+    
+    ScoreTables --> EvaluateThreshold: 计算质量分数
+    EvaluateThreshold --> PassThreshold: score >= table_score_threshold
+    EvaluateThreshold --> RejectTable: score < threshold
+    
+    PassThreshold --> ExtractHeaders: 解析表格结构
+    ExtractHeaders --> ExtractRows: 获取表头单元格
+    ExtractRows --> ExtractMetadata: 获取数据行
+    ExtractMetadata --> CreateTableObject: 获取标题/摘要
+    
+    CreateTableObject --> AddToResult: {headers, rows, caption, summary}
+    AddToResult --> [*]: 表格提取完成
+    
+    RejectTable --> [*]: 表格已跳过
+    
+    note right of ScoreTables : 因素: 表头存在性、数据密度、结构质量
+    note right of EvaluateThreshold : 阈值 1-10，越高越严格
+```
+
+### 错误处理决策树
+
+```mermaid
+flowchart TD
+    A[开始爬取] --> B[导航到 URL]
+    
+    B --> C{导航成功?}
+    C -->|网络错误| C1[设置 error_message: 网络故障]
+    C -->|超时| C2[设置 error_message: 页面超时]
+    C -->|无效 URL| C3[设置 error_message: 无效 URL 格式]
+    C -->|成功| D[处理页面内容]
+    
+    C1 --> E[success = False]
+    C2 --> E
+    C3 --> E
+    
+    D --> F{内容处理正常?}
+    F -->|解析器错误| F1[设置 error_message: HTML 解析失败]
+    F -->|内存错误| F2[设置 error_message: 内存不足]
+    F -->|成功| G[生成输出]
+    
+    F1 --> E
+    F2 --> E
+    
+    G --> H{输出生成正常?}
+    H -->|Markdown 错误| H1[部分成功带警告]
+    H -->|提取错误| H2[部分成功带警告]
+    H -->|成功| I[success = True]
+    
+    H1 --> I
+    H2 --> I
+    
+    E --> J[返回失败 CrawlResult]
+    I --> K[返回成功 CrawlResult]
+    
+    J --> L[用户错误处理]
+    K --> M[用户结果处理]
+    
+    L --> L1{检查 error_message}
+    L1 -->|网络| L2[使用不同配置重试]
+    L1 -->|超时| L3[增加 page_timeout]
+    L1 -->|解析器| L4[尝试不同 scraping_strategy]
+    
+    style E fill:#ffcdd2
+    style I fill:#c8e6c9
+    style J fill:#ffcdd2
+    style K fill:#c8e6c9
+```
+
+### 配置影响矩阵
+
+```mermaid
+graph TB
+    subgraph "配置类别"
+        A[内容处理]
+        B[页面交互] 
+        C[输出生成]
+        D[性能]
+    end
+    
+    subgraph "配置选项"
+        A --> A1[word_count_threshold]
+        A --> A2[excluded_tags]
+        A --> A3[css_selector]
+        A --> A4[exclude_external_links]
+        
+        B --> B1[process_iframes]
+        B --> B2[remove_overlay_elements]
+        B --> B3[scan_full_page]
+        B -->极 B4[wait_for]
+        
+        C --> C1[screenshot]
+        C --> C2[pdf] 
+        C --> C3[markdown_generator]
+        C --> C4[极table_score_threshold]
+        
+        D --> D1[cache_mode]
+        D --> D2[verbose]
+        D --> D3[page_timeout]
+        D --> D4[semaphore_count]
+    end
+    
+    subgraph "结果影响"
+        A1 --> R1[过滤短文本块]
+        A2 --> R2[移除指定 HTML 标签]
+        A3 --> R3[聚焦选定内容]
+        A4 --> R4[清理链接字典]
+        
+        B1 --> R5[包含 iframe 内容]
+        B2 --> R6[移除弹窗/模态框]
+        B3 --> R7[加载动态内容]
+        B4 --> R8[等待特定元素]
+        
+        C1 --> R9[添加截图字段]
+        C2 --> R10[添加 pdf 字段]
+        C3 --> R11[自定义 markdown 处理]
+        C4 --> R12[过滤表格质量]
+        
+        D1 --> R13[控制缓存行为]
+        D2 --> R14[详细日志输出]
+        D3 --> R15[防止超时错误]
+        D4 --> R16[限制并发操作]
+    end
+    
+    style A fill:#e3f2fd
+    style B fill:#f3e5f5
+    style C fill:#e8f5e8
+    style D fill:#fff3e0
+```
+
+### 原始 HTML 和本地文件处理
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Crawler
+    participant Processor
+    participant FileSystem
+    
+    Note over User,FileSystem: 原始 HTML 处理
+    User->>Crawler: arun("raw://html_content")
+    Crawler->>Processor: 直接解析原始 HTML
+    Processor->>Processor: 应用相同内容过滤器
+    Processor-->>Crawler: 标准 CrawlResult
+    Crawler-->>User: 带 markdown 的结果
+    
+    Note over User,FileSystem: 本地文件处理  
+    User->>Crawler: arun("file:///path/to/file.html")
+    Crawler->>FileSystem: 读取本地文件
+    FileSystem-->>Crawler: 文件内容
+    Crawler->>Processor: 处理文件 HTML
+    Processor->极>Processor: 应用内容处理
+    Processor-->>极Crawler: 标准 CrawlResult
+    Crawler-->>User: 带 markdown 的结果
+    
+    Note over User,FileSystem: 两者返回相同的 CrawlResult 结构
+```
+
+### 综合处理示例流程
+
+```mermaid
+flowchart TD
+    A[输入: example.com] --> B[创建配置]
+    
+    B --> B1[BrowserConfig verbose=True]
+    B --> B2[CrawlerRunConfig 带过滤器]
+    
+    B1 --> C[启动 AsyncWebCrawler]
+    B2 --> C
+    
+    C --> D[导航和处理]
+    
+    D --> E{检查成功}
+    E -->|失败| E1[打印错误信息]
+    E -->|成功| F[提取内容摘要]
+    
+    F --> F1[获取页面标题]
+    F --> F2[获取内容预览]
+    F --> F3[处理媒体项]
+    F --> F4[处理链接]
+    
+    F3 --> F3A[统计图片数]
+    F3 --> F3B[显示前 3 张图片]
+    
+    F4 --> F4A[统计内部链接数]
+    F4 --> F4B[显示前 3 个链接]
+    
+    F1 --> G[显示结果]
+    F2 --> G
+    F3A --> G
+    F3B --> G
+    F4A --> G
+    F4B --> G
+    
+    E1 --> H[以错误结束]
+    G --> I[以成功结束]
+    
+    style E1 fill:#ffcdd2
+    style G fill:#c8e6c9
+    style H fill:#ffcdd2
+    style I fill:#c8e6c9
+```
+
+**📖 了解更多:** [简单爬虫指南](https://docs.crawl4ai.com/core/simple-crawling/), [配置选项](https://docs.crawl4ai.com/core/browser-crawler-config/), [结果处理](https://docs.crawl4ai.com/core/crawler-result/), [表格提取](https://docs.crawl4ai.com/extraction/no-llm-strategies/)

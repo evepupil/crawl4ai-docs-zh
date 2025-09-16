@@ -1,0 +1,392 @@
+## 多URL爬取工作流与架构
+
+用于高效处理多个URL的并发爬取模式、资源管理和监控系统的可视化呈现。
+
+### 多URL处理模式
+
+```mermaid
+flowchart TD
+    A[多URL爬取请求] --> B{处理模式?}
+    
+    B -->|批量模式| C[收集所有URL]
+    B -->|流式模式| D[逐个处理URL]
+    
+    C --> C1[所有URL入队]
+    C1 --> C2[并发执行]
+    C2 --> C3[等待全部完成]
+    C3 --> C4[返回完整结果数组]
+    
+    D --> D1[URL入队]
+    D1 --> D2[开始第一批]
+    D2 --> D3[按可用性产出结果]
+    D3 --> D4{更多URL?}
+    D4 -->|是| D5[开始下一批URL]
+    D4 -->|否| D6[流式完成]
+    D5 --> D3
+    
+    C4 --> E[处理结果]
+    D6 --> E
+    
+    E --> F[成功/失败分析]
+    F --> G[结束]
+    
+    style C fill:#e3f2fd
+    style D fill:#f3e5f5
+    style C4 fill:#c8e6c9
+    style D6 fill:#c8e6c9
+```
+
+### 内存自适应调度器流程
+
+```mermaid
+stateDiagram-v2
+    [*] --> 初始化中
+    
+    初始化中 --> 监控内存: 启动调度器
+    
+    监控内存 --> 检查内存: 每个检查间隔
+    检查内存 --> 内存正常: 内存 < 阈值
+    检查内存 --> 内存过高: 内存 >= 阈值
+    
+    内存正常 --> 调度任务: 启动新爬取任务
+    内存过高 --> 等待内存释放: 暂停调度
+    
+    调度任务 --> 任务运行中: 启动爬虫
+    任务运行中 --> 任务完成: 爬取完成
+    任务运行中 --> 任务失败: 爬取出错
+    
+    任务完成 --> 监控内存: 更新统计
+    任务失败 --> 监控内存: 更新统计
+    
+    等待内存释放 --> 检查内存: 等待超时
+    等待内存释放 --> 监控内存: 内存已释放
+    
+    note right of 内存过高: 防止内存溢出崩溃
+    note right of 调度任务: 遵守最大会话许可
+    note right of 等待内存释放: 可配置超时
+```
+
+### 并发爬取架构
+
+```mermaid
+graph TB
+    subgraph "URL队列管理"
+        A[URL输入列表] --> B[URL队列]
+        B --> C[优先级调度器]
+        C --> D[批量分配]
+    end
+    
+    subgraph "调度器层"
+        E[内存自适应调度器]
+        F[信号量调度器]
+        G[速率限制器]
+        H[资源监控器]
+        
+        E --> I[内存检查器]
+        F --> J[并发控制器]
+        G --> K[延迟计算器]
+        H --> L[系统统计]
+    end
+    
+    subgraph "爬虫池"
+        M[爬虫实例1]
+        N[爬虫实例2]
+        O[爬虫实例3]
+        P[爬虫实例N]
+        
+        M --> Q[浏览器会话1]
+        N --> R[浏览器会话2]
+        O --> S[浏览器会话3]
+        P --> T[浏览器会话N]
+    end
+    
+    subgraph "结果处理"
+        U[结果收集器]
+        V[成功处理器]
+        W[错误处理器]
+        X[重试队列]
+        Y[最终结果]
+    end
+    
+    D --> E
+    D --> F
+    E --> M
+    F --> N
+    G --> O
+    H --> P
+    
+    Q --> U
+    R --> U
+    S --> U
+    T --> U
+    
+    U --> V
+    U --> W
+    W --> X
+    X --> B
+    V --> Y
+    
+    style E fill:#e3f2fd
+    style F fill:#f3e5f5
+    style G fill:#e8f5e8
+    style H fill:#fff3e0
+```
+
+### 速率限制与退避策略
+
+```mermaid
+sequenceDiagram
+    participant C as 爬虫
+    participant RL as 速率限制器
+    participant S as 服务器
+    participant D as 调度器
+    
+    C->>RL: 请求爬取URL
+    RL->>RL: 计算延迟
+    RL->>RL: 应用基础延迟(1-3秒)
+    RL->>C: 应用延迟
+    
+    C->>S: HTTP请求
+    
+    alt 成功响应
+        S-->>C: 200 OK + 内容
+        C->>RL: 报告成功
+        RL->>RL: 重置失败计数
+        C->>D: 返回成功结果
+    else 速率受限
+        S-->>C: 429 请求过多
+        C->>RL: 报告速率限制
+        RL->>RL: 指数退避
+        RL->>RL: 增加延迟(最大延迟上限)
+        RL->>C: 应用更长延迟
+        C->>S: 延迟后重试请求
+    else 服务器错误
+        S-->>C: 503 服务不可用
+        C->>RL: 报告服务器错误
+        RL->>RL: 适度退避
+        RL->>C: 退避后重试
+    else 超过最大重试次数
+        RL->>C: 停止重试
+        C->>D: 返回失败结果
+    end
+```
+
+### 大规模爬取工作流
+
+```mermaid
+flowchart TD
+    A[加载URL列表 10k+ URL] --> B[初始化调度器]
+    
+    B --> C{选择调度器类型}
+    C -->|内存受限| D[内存自适应]
+    C -->|固定资源| E[基于信号量]
+    
+    D --> F[设置内存阈值 70%]
+    E --> G[设置并发限制]
+    
+    F --> H[配置监控]
+    G --> H
+    
+    H --> I[开始爬取过程]
+    I --> J[监控系统资源]
+    
+    J --> K{内存使用情况?}
+    K -->|< 阈值| L[继续调度]
+    K -->|>= 阈值| M[暂停新任务]
+    
+    L --> N[处理结果流]
+    M --> O[等待内存释放]
+    O --> K
+    
+    N --> P{结果类型?}
+    P -->|成功| Q[保存到数据库]
+    P -->|失败| R[记录错误]
+    
+    Q --> S[更新进度计数器]
+    R --> S
+    
+    S --> T{更多URL?}
+    T -->|是| U[获取下一批次]
+    T -->|否| V[生成最终报告]
+    
+    U --> L
+    V --> W[分析完成]
+    
+    style A fill:#e1f5fe
+    style D fill:#e8f5e8
+    style E fill:#f3e5f5
+    style V fill:#c8e6c9
+    style W fill:#a5d6a7
+```
+
+### 实时监控面板流程
+
+```mermaid
+graph LR
+    subgraph "数据收集"
+        A[爬虫任务] --> B[性能指标]
+        A --> C[内存使用]
+        A --> D[成功/失败率]
+        A --> E[响应时间]
+    end
+    
+    subgraph "监控处理"
+        F[爬虫监控器] --> G[聚合统计]
+        F --> H[显示格式化器]
+        F --> I[更新调度器]
+    end
+    
+    subgraph "显示模式"
+        J[详细模式]
+        K[聚合模式]
+        
+        J --> L[单个任务状态]
+        J --> M[任务级指标]
+        K --> N[摘要统计]
+        K --> O[整体进度]
+    end
+    
+    subgraph "输出接口"
+        P[控制台显示]
+        Q[进度条]
+        R[状态表]
+        S[实时更新]
+    end
+    
+    B --> F
+    C --> F
+    D --> F
+    E --> F
+    
+    G --> J
+    G --> K
+    H --> J
+    H --> K
+    I --> J
+    I --> K
+    
+    L --> P
+    M --> Q
+    N --> R
+    O --> S
+    
+    style F fill:#e3f2fd
+    style J fill:#f3e5f5
+    style K fill:#e8f5e8
+```
+
+### 错误处理与恢复模式
+
+```mermaid
+stateDiagram-v2
+    [*] --> 处理URL中
+    
+    处理URL中 --> 爬取尝试: 开始爬取
+    
+    爬取尝试 --> 成功: HTTP 200
+    爬取尝试 --> 网络错误: 连接失败
+    爬取尝试 --> 速率限制: HTTP 429
+    爬取尝试 --> 服务器错误: HTTP 5xx
+    爬取尝试 --> 超时: 请求超时
+    
+    成功 --> [*]: 返回结果
+    
+    网络错误 --> 重试检查: 检查重试次数
+    速率限制 --> 退避等待: 应用指数退避
+    服务器错误 --> 重试检查: 检查重试次数
+    超时 --> 重试检查: 检查重试次数
+    
+    退避等待 --> 重试检查: 延迟后
+    
+    重试检查 --> 爬取尝试: 重试次数 < 最大重试
+    重试检查 --> 失败: 重试次数 >= 最大重试
+    
+    失败 --> 错误日志: 记录失败详情
+    错误日志 --> [*]: 返回失败结果
+    
+    note right of 退避等待: 对速率限制使用指数退避
+    note right of 重试检查: 可配置最大重试次数
+    note right of 错误日志: 详细错误跟踪
+```
+
+### 资源管理时间线
+
+```mermaid
+gantt
+    title 多URL爬取资源管理
+    dateFormat X
+    axisFormat %s
+    
+    section 内存使用
+    初始化调度器    :0, 1
+    内存监控       :1, 10
+    峰值使用期       :3, 7
+    内存清理          :7, 9
+    
+    section 任务执行
+    URL队列设置         :0, 2
+    批次1处理      :2, 5
+    批次2处理      :4, 7
+    批次3处理      :6, 9
+    最终结果           :9, 10
+    
+    section 速率限制
+    正常延迟           :2, 4
+    退避期          :4, 6
+    恢复期         :6, 8
+    
+    section 监控
+    系统健康检查     :0, 10
+    进度更新        :1, 9
+    性能指标     :2, 8
+```
+
+### 并发处理性能矩阵
+
+```mermaid
+graph TD
+    subgraph "输入因素"
+        A[URL数量]
+        B[并发级别]
+        C[内存阈值]
+        D[速率限制]
+    end
+    
+    subgraph "处理特性"
+        A --> E[低 1-100 URL]
+        A --> F[中 100-1k URL]
+        A --> G[高 1k-10k URL]
+        A --> H[极高 10k+ URL]
+        
+        B --> I[保守 1-5]
+        B --> J[中等 5-15]
+        B --> K[激进 15-30]
+        
+        C --> L[严格 60-70%]
+        C --> M[平衡 70-80%]
+        C --> N[宽松 80-90%]
+    end
+    
+    subgraph "推荐配置"
+        E --> O[简单信号量]
+        F --> P[基础内存自适应]
+        G --> Q[高级内存自适应]
+        H --> R[内存自适应 + 监控]
+        
+        I --> O
+        J --> P
+        K --> Q
+        K --> R
+        
+        L --> Q
+        M --> P
+        N --> O
+    end
+    
+    style O fill:#c8e6c9
+    style P fill:#fff3e0
+    style Q fill:#ffecb3
+    style R fill:#ffcdd2
+```
+
+**📖 了解更多:** [多URL爬取指南](https://docs.crawl4ai.com/advanced/multi-url-crawling/), [调度器配置](https://docs.crawl4ai.com/advanced/crawl-dispatcher/), [性能优化](https://docs.crawl4ai.com/advanced/multi-url-crawling/#performance-optimization)

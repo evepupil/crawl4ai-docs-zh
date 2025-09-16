@@ -1,0 +1,428 @@
+## 深度爬取工作流与架构
+
+多层级网站探索、过滤策略与智能爬取模式的可视化呈现。
+
+### 深度爬取策略概览
+
+```mermaid
+flowchart TD
+    A[开始深度爬取] --> B{策略选择}
+    
+    B -->|探索所有层级| C[BFS 广度优先策略]
+    B -->|快速深入爬取| D[DFS 深度优先策略] 
+    B -->|智能优先级| E[最佳优先策略]
+    
+    C --> C1[广度优先搜索]
+    C1 --> C2[处理所有深度0链接]
+    C2 --> C3[处理所有深度1链接]
+    C3 --> C4[按深度层级继续]
+    
+    D --> D1[深度优先搜索]
+    D1 --> D2[沿首个链接深入]
+    D2 --> D3[达到最大深度后回溯]
+    D3 --> D4[继续下一个分支]
+    
+    E --> E1[最佳优先搜索]
+    E1 --> E2[为所有发现的URL评分]
+    E2 --> E3[优先处理评分最高的URL]
+    E3 --> E4[持续重新排序队列]
+    
+    C4 --> F[应用过滤器]
+    D4 --> F
+    E4 --> F
+    
+    F --> G{过滤链处理}
+    G -->|域名过滤器| G1[检查允许/阻止的域名]
+    G -->|URL模式过滤器| G2[匹配URL模式]
+    G -->|内容类型过滤器| G3[验证内容类型]
+    G -->|SEO过滤器| G4[评估SEO质量]
+    G -->|内容相关性| G5[评分内容相关性]
+    
+    G1 --> H{通过所有过滤器？}
+    G2 --> H
+    G3 --> H
+    G4 --> H
+    G5 --> H
+    
+    H -->|是| I[添加到爬取队列]
+    H -->|否| J[丢弃URL]
+    
+    I --> K{处理模式}
+    K -->|流式处理| L[立即处理]
+    K -->|批处理| M[收集所有结果]
+    
+    L --> N[将结果流式传输给用户]
+    M --> O[返回完整结果集]
+    
+    J --> P{队列中还有更多URL？}
+    N --> P
+    O --> P
+    
+    P -->|是| Q{在限制范围内？}
+    P -->|否| R[深度爬取完成]
+    
+    Q -->|最大深度OK| S{最大页面数OK}
+    Q -->|超过最大深度| T[跳过更深层URL]
+    
+    S -->|低于限制| U[继续爬取]
+    S -->|达到限制| R
+    
+    T --> P
+    U --> F
+    
+    style A fill:#e1f5fe
+    style R fill:#c8e6c9
+    style C fill:#fff3e0
+    style D fill:#f3e5f5
+    style E fill:#e8f5e8
+```
+
+### 深度爬取策略比较
+
+```mermaid
+graph TB
+    subgraph "BFS - 广度优先搜索"
+        BFS1[层级 0: 起始URL]
+        BFS2[层级 1: 所有直接链接]
+        BFS3[层级 2: 所有二级链接]
+        BFS4[层级 3: 所有三级链接]
+        
+        BFS1 --> BFS2
+        BFS2 --> BFS3
+        BFS3 --> BFS4
+        
+        BFS_NOTE[完成每个深度后再深入<br/>适用于站点地图生成<br/>对宽泛站点内存消耗大]
+    end
+    
+    subgraph "DFS - 深度优先搜索"
+        DFS1[起始URL]
+        DFS2[首个链接 → 深入]
+        DFS3[跟踪直至最大深度]
+        DFS4[回溯并尝试下一个]
+        
+        DFS1 --> DFS2
+        DFS2 --> DFS3
+        DFS3 --> DFS4
+        DFS4 --> DFS2
+        
+        DFS_NOTE[沿第一条路径深入<br/>内存高效<br/>可能遗漏重要页面]
+    end
+    
+    subgraph "最佳优先 - 优先级队列"
+        BF1[起始URL]
+        BF2[为所有发现的链接评分]
+        BF3[优先处理评分最高的]
+        BF4[持续重新确定优先级]
+        
+        BF1 --> BF2
+        BF2 --> BF3
+        BF3 --> BF4
+        BF4 --> BF2
+        
+        BF_NOTE[智能优先级排序<br/>快速找到相关内容<br/>推荐用于大多数用例]
+    end
+    
+    style BFS1 fill:#e3f2fd
+    style DFS1 fill:#f3e5f5
+    style BF1 fill:#e8f5e8
+    style BFS_NOTE fill:#fff3e0
+    style DFS_NOTE fill:#fff3e0
+    style BF_NOTE fill:#fff3e0
+```
+
+### 过滤链处理顺序
+
+```mermaid
+sequenceDiagram
+    participant URL as 发现的URL
+    participant Chain as 过滤链
+    participant Domain as 域名过滤器
+    participant Pattern as URL模式过滤器
+    participant Content as 内容类型过滤器
+    participant SEO as SEO过滤器
+    participant Relevance as 内容相关性过滤器
+    participant Queue as 爬取队列
+    
+    URL->>Chain: 处理URL
+    Chain->>Domain: 检查域名规则
+    
+    alt 域名允许
+        Domain-->>Chain: ✓ 通过
+        Chain->>Pattern: 检查URL模式
+        
+        alt 模式匹配
+            Pattern-->>Chain: ✓ 通过
+            Chain->>Content: 检查内容类型
+            
+            alt 内容类型有效
+                Content-->>Chain: ✓ 通过
+                Chain->>SEO: 评估SEO质量
+                
+                alt SEO评分高于阈值
+                    SEO-->>Chain: ✓ 通过
+                    Chain->>Relevance: 评分内容相关性
+                    
+                    alt 相关性评分高
+                        Relevance-->>Chain: ✓ 通过
+                        Chain->>Queue: 添加到爬取队列
+                        Queue-->>URL: 已加入爬取队列
+                    else 相关性评分低
+                        Relevance-->>Chain: ✗ 拒绝
+                        Chain-->>URL: 已过滤 - 相关性低
+                    end
+                else SEO评分低
+                    SEO-->>Chain: ✗ 拒绝
+                    Chain-->>URL: 已过滤 - SEO质量差
+                end
+            else 无效内容类型
+                Content-->>Chain: ✗ 拒绝
+                Chain-->>URL: 已过滤 - 错误内容类型
+            end
+        else 模式不匹配
+            Pattern-->>Chain: ✗ 拒绝
+            Chain-->>URL: 已过滤 - 模式不匹配
+        end
+    else 域名被阻止
+        Domain-->>Chain: ✗ 拒绝
+        Chain-->>URL: 已过滤 - 阻止的域名
+    end
+```
+
+### URL生命周期状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> 已发现: 在页面上找到
+    
+    已发现 --> 过滤待处理: 进入过滤链
+    
+    过滤待处理 --> 域名检查: 应用域名过滤器
+    域名检查 --> 模式检查: 域名允许
+    域名检查 --> 已拒绝: 域名阻止
+    
+    模式检查 --> 内容检查: 模式匹配
+    模式检查 --> 已拒绝: 模式不匹配
+    
+    内容检查 --> SEO检查: 内容类型有效
+    内容检查 --> 已拒绝: 无效内容
+    
+    SEO检查 --> 相关性检查: SEO评分足够
+    SEO检查 --> 已拒绝: SEO评分差
+    
+    相关性检查 --> 已评分: 计算相关性评分
+    相关性检查 --> 已拒绝: 相关性低
+    
+    已评分 --> 已排队: 添加到优先级队列
+    
+    已排队 --> 爬取中: 被选中处理
+    爬取中 --> 成功: 页面爬取成功
+    爬取中 --> 失败: 爬取失败
+    
+    成功 --> 链接提取: 提取新链接
+    链接提取 --> [*]: 处理完成
+    
+    失败 --> [*]: 记录失败
+    已拒绝 --> [*]: 记录拒绝原因
+    
+    note right of 已评分 : 评分决定优先级<br/>在最佳优先策略中
+    
+    note right of 失败 : 错误记录包含<br/>深度和原因
+```
+
+### 流式处理与批处理架构
+
+```mermaid
+graph TB
+    subgraph "输入"
+        A[起始URL] --> B[深度爬取策略]
+    end
+    
+    subgraph "爬取引擎"
+        B --> C[URL发现]
+        C --> D[过滤链]
+        D --> E[优先级队列]
+        E --> F[页面处理器]
+    end
+    
+    subgraph "流式模式 stream=True"
+        F --> G1[处理页面]
+        G1 --> H1[提取内容]
+        H1 --> I1[立即生成结果]
+        I1 --> J1[async for result]
+        J1 --> K1[实时处理]
+        
+        G1 --> L1[提取链接]
+        L1 --> M1[添加到队列]
+        M1 --> F
+    end
+    
+    subgraph "批处理模式 stream=False"
+        F --> G2[处理页面]
+        G2 --> H2[提取内容]
+        H2 --> I2[存储结果]
+        I2 --> N2[结果收集]
+        
+        G2 --> L2[提取链接]
+        L2 --> M2[添加到队列]
+        M2 --> O2{更多URL？}
+        O2 -->|是| F
+        O2 -->|否| P2[返回所有结果]
+        P2 --> Q2[批处理]
+    end
+    
+    style I1 fill:#e8f5e8
+    style K1 fill:#e8f5e8
+    style P2 fill:#e3f2fd
+    style Q2 fill:#e3f2fd
+```
+
+### 高级评分与优先级系统
+
+```mermaid
+flowchart LR
+    subgraph "URL发现"
+        A[页面链接] --> B[提取URL]
+        B --> C[规范化URL]
+    end
+    
+    subgraph "评分系统"
+        C --> D[关键词相关性评分器]
+        D --> D1[URL文本分析]
+        D --> D2[关键词匹配]
+        D --> D3[计算基础评分]
+        
+        D3 --> E[附加评分因素]
+        E --> E1[URL结构权重: 0.2]
+        E --> E2[链接上下文权重: 0.3]
+        E --> E3[页面深度惩罚权重: 0.1]
+        E --> E4[域名权威权重: 0.4]
+        
+        D1 --> F[综合评分]
+        D2 --> F
+        D3 --> F
+        E1 --> F
+        E2 --> F
+        E3 --> F
+        E4 --> F
+    end
+    
+    subgraph "优先级排序"
+        F --> G{评分阈值}
+        G -->|高于阈值| H[优先级队列]
+        G -->|低于阈值| I[丢弃URL]
+        
+        H --> J[最佳优先选择]
+        J --> K[最高评分优先]
+        K --> L[处理页面]
+        
+        L --> M[更新评分]
+        M --> N[重新排序队列]
+        N --> J
+    end
+    
+    style F fill:#fff3e0
+    style H fill:#e8f5e8
+    style L fill:#e3f2fd
+```
+
+### 深度爬取性能与限制
+
+```mermaid
+graph TD
+    subgraph "爬取约束"
+        A[最大深度: 2] --> A1[防止无限爬取]
+        B[最大页面数: 50] --> B1[控制资源使用]
+        C[评分阈值: 0.3] --> C1[质量过滤]
+        D[域名限制] --> D1[范围控制]
+    end
+    
+    subgraph "性能监控"
+        E[已爬取页面] --> F[深度分布]
+        E --> G[成功率]
+        E --> H[平均评分]
+        E --> I[处理时间]
+        
+        F --> J[性能报告]
+        G --> J
+        H --> J
+        I --> J
+    end
+    
+    subgraph "资源管理"
+        K[内存使用] --> L{内存阈值}
+        L -->|低于限制| M[继续爬取]
+        L -->|超过限制| N[减少并发]
+        
+        O[CPU使用] --> P{CPU阈值}
+        P -->|正常| M
+        P -->|高| Q[添加延迟]
+        
+        R[网络负载] --> S{速率限制}
+        S -->|OK| M
+        S -->|超出| T[限制请求]
+    end
+    
+    M --> U[最佳性能]
+    N --> V[降低性能]
+    Q --> V
+    T --> V
+    
+    style U fill:#c8e6c9
+    style V fill:#fff3e0
+    style J fill:#e3f2fd
+```
+
+### 错误处理与恢复流程
+
+```mermaid
+sequenceDiagram
+    participant Strategy as 深度爬取策略
+    participant Queue as 优先级队列
+    participant Crawler as 页面爬取器
+    participant Error as 错误处理器
+    participant Result as 结果收集器
+    
+    Strategy->>Queue: 获取下一个URL
+    Queue-->>Strategy: 返回最高优先级URL
+    
+    Strategy->>Crawler: 爬取页面
+    
+    alt 爬取成功
+        Crawler-->>Strategy: 返回页面内容
+        Strategy->>Result: 存储成功结果
+        Strategy->>Strategy: 提取新链接
+        Strategy->>Queue: 将新URL添加到队列
+    else 网络错误
+        Crawler-->>Error: 网络超时/失败
+        Error->>Error: 记录错误详情
+        Error->>Queue: 将URL标记为失败
+        Error-->>Strategy: 跳过至下一个URL
+    else 解析错误
+        Crawler-->>Error: HTML解析失败
+        Error->>Error: 记录解析错误
+        Error->>Result: 存储失败结果
+        Error-->>Strategy: 继续下一个URL
+    else 速率限制触发
+        Crawler-->>Error: 超出速率限制
+        Error->>Error: 应用退避策略
+        Error->>Queue: 重新排队URL并延迟
+        Error-->>Strategy: 等待后重试
+    else 深度限制
+        Strategy->>Strategy: 检查深度约束
+        Strategy-->>Queue: 跳过URL - 深度过大
+    else 页面限制
+        Strategy->>Strategy: 检查页面计数
+        Strategy-->>Result: 停止爬取 - 达到限制
+    end
+    
+    Strategy->>Queue: 请求下一个URL
+    Queue-->>Strategy: 还有更多URL？
+    
+    alt 队列为空
+        Queue-->>Result: 爬取完成
+    else 队列有URL
+        Queue-->>Strategy: 继续爬取
+    end
+```
+
+**📖 了解更多:** [深度爬取策略](https://docs.crawl4ai.com/core/deep-crawling/), [内容过滤](https://docs.crawl4ai.com/core/content-selection/), [高级爬取模式](https://docs.crawl4ai.com/advanced/advanced-features/)

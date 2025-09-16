@@ -1,0 +1,1837 @@
+## URL 种子发现
+
+智能 URL 发现技术，助力高效大规模爬取。即时发现数千个 URL，按相关性筛选，仅抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com", config)
+        print(f"即时发现了 {len(urls)} 个 URL")
+        # 现在仅抓取最相关的 URL
+```
+
+### 基础 URL 发现
+
+```python
+import asyncio
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def basic_discovery():
+    # 上下文管理器自动处理清理工作
+    async with AsyncUrlSeeder() as seeder:
+        
+        # 从站点地图简单发现
+        config = SeedingConfig(source="sitemap")
+        urls = await seeder.urls("example.com", config)
+        
+        print(f"从站点地图发现了 {len(urls)} 个 URL")
+        for url in urls[:5]:
+            print(f"  - {url['url']} (状态: {url['status']})")
+
+# 手动清理（如果需要）
+async def manual_cleanup():
+    seeder = AsyncUrlSeeder()
+    try:
+        config = SeedingConfig(source="cc")  # Common Crawl
+        urls = await seeder.urls("example.com", config)
+        print(f"从 Common Crawl 发现了 {len(urls)} 个 URL")
+    finally:
+        await seeder.close()
+
+asyncio.run(basic_discovery())
+```
+
+### 数据源与模式匹配
+
+```python
+# 不同的数据源
+configs = [
+    SeedingConfig(source="sitemap"),        # 最快，官方 URL
+    SeedingConfig(source="cc"),             # 最全面
+    SeedingConfig(source="sitemap+cc"),     # 最大覆盖范围
+]
+
+# URL 模式过滤
+patterns = [
+    SeedingConfig(pattern="*/blog/*"),           # 仅博客文章
+    SeedingConfig(pattern="*.html"),             # 仅 HTML 文件
+    SeedingConfig(pattern="*/product/*"),        # 产品页面
+    SeedingConfig(pattern="*/docs/api/*"),       # API 文档
+    SeedingConfig(pattern="*"),                  # 所有内容
+]
+
+# 高级模式使用
+async def pattern_filtering():
+    async with AsyncUrlSeeder() as seeder:
+        # 查找 2024 年的所有博客文章
+        config = SeedingConfig(
+            source="sitemap",
+            pattern="*/blog/2024/*.html",
+            max_urls=100
+        )
+        
+        blog_urls = await seeder.urls("example.com", config)
+        
+        # 根据 URL 中的关键词进一步筛选
+        python_posts = [
+            url for url in blog_urls 
+            if "python" in url['url'].lower()
+        ]
+        
+        print(f"发现了 {len(python_posts)} 篇 Python 博客文章")
+```
+
+### SeedingConfig 参数
+
+```python
+from crawl4ai import SeedingConfig
+
+# 全面配置
+config = SeedingConfig(
+    # 数据源
+    source="sitemap+cc",              # "sitemap", "cc", "sitemap+cc"
+    pattern="*/docs/*",               # URL 模式过滤器
+    
+    # 元数据提取
+    extract_head=True,                # 获取 <head> 元数据
+    live_check=True,                  # 验证 URL 可访问性
+    
+    # 性能控制
+    max_urls=1000,                    # 限制结果数量 (-1 = 无限制)
+    concurrency=20,                   # 并行工作线程数
+    hits_per_sec=10,                  # 速率限制
+    
+    # 相关性评分
+    query="API documentation guide",   # 搜索查询
+    scoring_method="bm25",            # 评分算法
+    score_threshold=0.3,              # 最小相关性 (0.0-1.0)
+    
+    # 缓存和过滤
+    force=False,                      # 绕过缓存
+    filter_nonsense_urls=True,        # 移除工具类 URL
+    verbose=True                      # 调试输出
+)
+
+# 常见用例的快速配置
+blog_config = SeedingConfig(
+    source="sitemap",
+    pattern="*/blog/*", 
+    extract_head=True
+)
+
+api_docs_config = SeedingConfig(
+    source="sitemap+cc",
+    pattern="*/docs/*",
+    query="API reference documentation",
+    scoring_method="bm25",
+    score_threshold=0.5
+)
+
+product_pages_config = SeedingConfig(
+    source="cc",
+    pattern="*/product/*",
+    live_check=True,
+    max_urls=500
+)
+```
+
+### 元数据提取与分析
+
+```python
+async def metadata_extraction():
+    async with AsyncUrlSeeder() as seeder:
+        config = SeedingConfig(
+            source="sitemap",
+            extract_head=True,        # 提取 <head> 元数据
+            pattern="*/blog/*",
+            max_urls=50
+        )
+        
+        urls = await seeder.urls("example.com", config)
+        
+        # 分析提取的元数据
+        for url in urls[:5]:
+            head_data = url['head_data']
+            print(f"\nURL: {url['url']}")
+            print(f"标题: {head_data.get('title', '无标题')}")
+            
+            # 标准元标签
+            meta = head_data.get('meta', {})
+            print(f"描述: {meta.get('description', '无')}")
+            print(f"关键词: {meta.get('keywords', '无')}")
+            print(f"作者: {meta.get('author', '无')}")
+            
+            # Open Graph 数据
+            print(f"OG 图片: {meta.get('og:image', '无')}")
+            print(f"OG 类型: {meta.get('og:type', '无')}")
+            
+            # JSON-LD 结构化数据
+            jsonld = head_data.get('jsonld', [])
+            if jsonld:
+                print(f"结构化数据: {len(jsonld)} 项")
+                for item in jsonld[:2]:
+                    if isinstance(item, dict):
+                        print(f"  类型: {item.get('@type', '未知')}")
+                        print(f"  名称: {item.get('name', '无')}")
+
+# 按元数据过滤
+async def metadata_filtering():
+    async with AsyncUrlSeeder() as seeder:
+        config = SeedingConfig(
+            source="sitemap",
+            extract_head=True,
+            max_urls=100
+        )
+        
+        urls = await seeder.urls("news.example.com", config)
+        
+        # 按发布日期过滤（从 JSON-LD 获取）
+        from datetime import datetime, timedelta
+        recent_cutoff = datetime.now() - timedelta(days=7)
+        
+        recent_articles = []
+        for url in urls:
+            for jsonld in url['head_data'].get('jsonld', []):
+                if isinstance(jsonld, dict) and 'datePublished' in jsonld:
+                    try:
+                        pub_date = datetime.fromisoformat(
+                            jsonld['datePublished'].replace('Z', '+00:00')
+                        )
+                        if pub_date > recent_cutoff:
+                            recent_articles.append(url)
+                            break
+                    except:
+                        continue
+        
+        print(f"发现了 {len(recent_articles)} 篇近期文章")
+```
+
+### BM25 相关性评分
+
+```python
+async def relevance_scoring():
+    async with AsyncUrlSeeder() as seeder:
+        # 查找关于 Python 异步编程的页面
+        config = SeedingConfig(
+            source="sitemap",
+            extract_head=True,              # 基于内容的评分需要此选项
+            query="python async await concurrency",
+            scoring_method="bm25",
+            score_threshold=0.3,            # 仅保留相关性 30%+ 的页面
+            max_urls=20
+        )
+        
+        urls = await seeder.urls("docs.python.org", config)
+        
+        # 结果自动按相关性排序
+        print("最相关的 Python 异步内容:")
+        for url in urls[:5]:
+            score = url['relevance_score']
+            title = url['head_data'].get('title', '无标题')
+            print(f"[{score:.2f}] {title}")
+            print(f"        {url['url']}")
+
+# URL 基础评分（当 extract_head=False 时）
+async def url_based_scoring():
+    async with AsyncUrlSeeder() as seeder:
+        config = SeedingConfig(
+            source="sitemap",
+            extract_head=False,             # 快速的仅 URL 评分
+            query="machine learning tutorial",
+            scoring_method="bm25",
+            score_threshold=0.2
+        )
+        
+        urls = await seeder.urls("example.com", config)
+        
+        # 基于 URL 结构、域名、路径段的评分
+        for url in urls[:5]:
+            print(f"[{url['relevance_score']:.2f}] {url['url']}")
+
+# 多概念查询
+async def complex_queries():
+    queries = [
+        "data science pandas numpy visualization",
+        "web scraping automation selenium",
+        "machine learning tensorflow pytorch",
+        "api documentation rest graphql"
+    ]
+    
+    async with AsyncUrlSeeder() as seeder:
+        all_results = []
+        
+        for query in queries:
+            config = SeedingConfig(
+                source="sitemap",
+                extract_head=True,
+                query=query,
+                scoring_method="bm25",
+                score_threshold=0.4,
+                max_urls=10
+            )
+            
+            urls = await seeder.urls("learning-site.com", config)
+            all_results.extend(urls)
+        
+        # 按顺序去重
+        seen = set()
+        unique_results = []
+        for url in all_results:
+            if url['url'] not in seen:
+                seen.add(url['url'])
+                unique_results.append(url)
+        
+        print(f"在所有主题中发现了 {len(unique_results)} 个唯一页面")
+```
+
+### 实时 URL 验证
+
+```python
+async def url_validation():
+    async with AsyncUrlSeeder() as seeder:
+        config = SeedingConfig(
+            source="sitemap",
+            live_check=True,              # 验证 URL 可访问性
+            concurrency=15,               # 并行 HEAD 请求
+            hits_per_sec=8,              # 速率限制
+            max_urls=100
+        )
+        
+极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+           极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCraw极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com", config)
+        print(f"即时发现了 {len(urls)} 个 URL")
+        # 现在仅抓取最相关的 URL
+```
+
+### 基础 URL 发现
+
+```python
+import asyncio
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def basic_discovery():
+    # 上下文管理器自动处理清理工作
+    async with AsyncUrlSeeder() as seeder:
+        
+        # 从站点地图简单发现
+        config = SeedingConfig(source="sitemap")
+        ur极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=B极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print极速 URL 发现，大规模极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, Crawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl极速 URL 发现，大规模爬取更高效。即时发现数千 URL，极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = Crawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.ar极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取极速 URL 发现，大规模爬取极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with Async极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep极速 URL 发现，大规模爬取更高效。即时极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawl极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRun极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import极速 URL 发现，大规模爬取更高效。即时发现数千极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com", config)
+        print(f"即时发现了 {len(urls)} 个 URL")
+        # 现在仅抓取最相关的 URL
+```
+
+### 基础 URL 发现
+
+```python
+import asyncio
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def basic_discovery():
+    # 上下文管理器自动处理清理工作极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler()极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy极速 URL 极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com", config)
+        print(f"即时发现了 {len(urls)} 个 URL")
+        # 现在仅抓取最相关的 URL
+```
+
+### 基础 URL 发现
+
+```python
+import asyncio
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def basic_discovery():
+    # 上下文管理器自动处理清理工作
+    async with AsyncUrlSeeder() as seeder:
+        
+        # 从站点地图简单发现
+        config = SeedingConfig(source="sitemap")
+        urls = await seeder.urls("example.com", config)
+        
+        print(f"从站点地图发现了 {极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWeb极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = Crawler极速 URL 发现，大规模爬极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_ex极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as craw极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = Crawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性极速 URL 发现，大规模爬取更高效。即时发现数千 URL，极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = Seeding极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_url极速 URL 发现，大规模爬取极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import Async极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, Crawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_c极速 URL 发现，大规模爬取更高效。极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm25",
+        max_urls=1000
+    )
+    
+    async with AsyncUrlSeeder() as seeder:
+        urls = await seeder.urls("example.com", config)
+        print(f"即时发现了 {len(urls)} 个 URL")
+        # 现在仅抓取最相关的 URL
+```
+
+### 基础 URL 发现
+
+```python
+import asyncio
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def basic_discovery():
+    # 上下文管理器自动处理清理工作
+    async with AsyncUrlSeeder() as seeder:
+        
+        # 从站点地图简单发现
+        config = SeedingConfig(source="sitemap")
+        urls = await seeder.urls("example.com", config)
+        
+        print(f"从站点地图发现了 {len(urls)} 个 URL")
+        for url in urls[:5]:
+            print(f"  - {url['url']} (状态: {url['status']})")
+
+# 手动清理（如果需要）
+async def manual_clean极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config)
+        print(f"动态发现了 {len(results)} 个页面")
+
+# URL 种子发现：批量发现（即时获取数千个）
+from crawl4ai import AsyncUrlSeeder, SeedingConfig
+
+async def url_seeding_example():
+    config = SeedingConfig(
+        source="sitemap+cc",
+        pattern="*/docs/*",
+        extract_head=True,
+        query="API documentation",
+        scoring_method="bm极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import B极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = Crawler极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRun极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max极速 URL 发现，大规模爬取更高效。即时发现极速 URL 发现，大规模爬取更极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max_pages=50
+        )
+    )
+    
+    async with AsyncWebCrawler() as crawler:
+        results = await crawler.arun("https://example.com", config=config极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFS极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+           极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import Async极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeep极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeepCrawlStrategy(
+            max_depth=2,
+            include_external=False,
+            max极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓极速 URL 发现，大规模爬取更高效。即时发现数千 URL，按相关性筛选，只抓取重要内容。
+
+### URL 种子发现 vs 深度爬取
+
+```python
+# 深度爬取：实时发现（逐页进行）
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+
+async def deep_crawl_example():
+    config = CrawlerRunConfig(
+        deep_crawl_strategy=BFSDeep

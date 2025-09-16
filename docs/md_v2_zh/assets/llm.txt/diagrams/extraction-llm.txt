@@ -1,0 +1,478 @@
+## 提取策略工作流与架构
+
+Crawl4AI 数据提取方法、策略选择和处理流程的可视化呈现。
+
+### 提取策略决策树
+
+```mermaid
+flowchart TD
+    A[待提取内容] --> B{内容类型?}
+    
+    B -->|简单模式| C[通用数据类型]
+    B -->|结构化HTML| D[可预测结构]
+    B -->|复杂内容| E[需要推理]
+    B -->|混合内容| F[多种数据类型]
+    
+    C --> C1{模式类型?}
+    C1 -->|邮箱、电话、URL| C2[内置正则表达式模式]
+    C1 -->|自定义模式| C3[自定义正则表达式策略]
+    C1 -->|LLM生成| C4[一次性模式生成]
+    
+    D --> D1{选择器类型?}
+    D1 -->|CSS选择器| D2[JsonCssExtractionStrategy]
+    D1 -->|XPath表达式| D3[JsonXPathExtractionStrategy]
+    D1 -->|需要模式?| D4[使用LLM自动生成模式]
+    
+    E --> E1{LLM提供商?}
+    E1 -->|OpenAI/Anthropic| E2[云端LLM策略]
+    E1 -->|本地Ollama| E3[本地LLM策略]
+    E1 -->|成本敏感| E4[混合模式：一次性生成模式]
+    
+    F --> F1[多策略方法]
+    F1 --> F2[1. 正则表达式处理模式]
+    F1 --> F3[2. CSS处理结构]
+    F1 --> F4[3. LLM处理复杂分析]
+    
+    C2 --> G[快速提取 ⚡]
+    C3 --> G
+    C4 --> H[缓存模式复用]
+    
+    D2 --> I[基于模式的提取 🏗️]
+    D3 --> I
+    D4 --> J[生成模式缓存]
+    
+    E2 --> K[智能解析 🧠]
+    E3 --> K
+    E4 --> L[混合成本效益]
+    
+    F2 --> M[全面结果 📊]
+    F3 --> M
+    F4 --> M
+    
+    style G fill:#c8e6c9
+    style I fill:#e3f2fd
+    style K fill:#fff3e0
+    style M fill:#f3e5f5
+    style H fill:#e8f5e8
+    style J fill:#e8f5e8
+    style L fill:#ffecb3
+```
+
+### LLM提取策略工作流
+
+```mermaid
+sequenceDiagram
+    participant 用户
+    participant 爬虫
+    participant LLM策略
+    participant 分块器
+    participant LLM提供商
+    participant 解析器
+    
+    用户->>爬虫: 配置LLMExtractionStrategy
+    用户->>爬虫: arun(网址, 配置)
+    
+    爬虫->>爬虫: 导航至URL
+    爬虫->>爬虫: 提取内容(HTML/Markdown)
+    爬虫->>LLM策略: 处理内容
+    
+    LLM策略->>LLM策略: 检查内容大小
+    
+    alt 内容 > 分块阈值
+        LLM策略->>分块器: 分割为带重叠的块
+        分块器-->>LLM策略: 返回块数组[]
+        
+        loop 对每个块循环
+            LLM策略->>LLM提供商: 发送块 + 模式 + 指令
+            LLM提供商-->>LLM策略: 返回结构化JSON
+        end
+        
+        LLM策略->>LLM策略: 合并块结果
+    else 内容 <= 阈值
+        LLM策略->>LLM提供商: 发送完整内容 + 模式
+        LLM提供商-->>LLM策略: 返回结构化JSON
+    end
+    
+    LLM策略->>解析器: 验证JSON模式
+    解析器-->>LLM策略: 验证后的数据
+    
+    LLM策略->>LLM策略: 跟踪令牌使用量
+    LLM策略-->>爬虫: 返回extracted_content
+    
+    爬虫-->>用户: 包含JSON数据的CrawlResult
+    
+    用户->>LLM策略: show_usage()
+    LLM策略-->>用户: 令牌计数和预估成本
+```
+
+### 基于模式的提取架构
+
+```mermaid
+graph TB
+    subgraph "模式定义"
+        A[JSON模式] --> A1[baseSelector]
+        A --> A2[字段数组[]]
+        A --> A3[嵌套结构]
+        
+        A2 --> A4[CSS/XPath选择器]
+        A2 --> A5[数据类型: text, html, attribute]
+        A2 --> A6[默认值]
+        
+        A3 --> A7[嵌套对象]
+        A3 --> A8[nested_list数组]
+        A3 --> A9[简单列表]
+    end
+    
+    subgraph "提取引擎"
+        B[HTML内容] --> C[选择器引擎]
+        C --> C1[CSS选择器解析器]
+        C --> C2[XPath求值器]
+        
+        C1 --> D[元素匹配器]
+        C2 --> D
+        
+        D --> E[类型转换器]
+        E --> E1[文本提取]
+        E --> E2[HTML保留]
+        E --> E3[属性提取]
+        E --> E4[嵌套处理]
+    end
+    
+    subgraph "结果处理"
+        F[原始提取数据] --> G[结构构建器]
+        G --> G1[对象构建]
+        G --> G2[数组组装]
+        G --> G3[类型验证]
+        
+        G1 --> H[JSON输出]
+        G2 --> H
+        G3 --> H
+    end
+    
+    A --> C
+    E --> F
+    H --> I[extracted_content]
+    
+    style A fill:#e3f2fd
+    style C fill:#f3e5f5
+    style G fill:#e8f5e8
+    style H fill:#极速提取
+```
+
+### 自动模式生成流程
+
+```mermaid
+stateDiagram-v2
+    [*] --> 检查缓存
+    
+    检查缓存 --> 缓存命中: 模式存在
+    检查缓存 --> 采样页面: 模式缺失
+    
+    缓存命中 --> 加载模式
+    加载模式 --> 快速提取
+    
+    采样页面 --> 提取HTML: 抓取采样URL
+    提取HTML --> LLM分析: 发送HTML至LLM
+    LLM分析 --> 生成模式: 创建CSS/XPath选择器
+    生成模式 --> 验证模式: 测试生成模式
+    
+    验证模式 --> 模式有效: 有效选择器
+    验证模式 --> 优化模式: 无效选择器
+    
+    优化模式 --> LLM分析: 带反馈迭代
+    
+    模式有效 --> 缓存模式: 保存以供复用
+    缓存模式 --> 快速提取: 使用缓存模式
+    
+    快速提取 --> [*]: 无需再调用LLM
+    
+    note right of 检查缓存 : 一次性LLM成本
+    note right of 快速提取 : 无限次快速复用
+    note right of 缓存模式 : JSON文件存储
+```
+
+### 多策略提取管道
+
+```mermaid
+flowchart LR
+    A[网页内容] --> B[策略管道]
+    
+    subgraph B["提取管道"]
+        B1[阶段1: 正则表达式模式]
+        B2[阶段2: 基于模式的CSS]
+        B3[阶段3: LLM分析]
+        
+        B1 --> B1a[邮箱地址]
+        B1 --> B1b[电话号码]
+        B1 --> B1c[URL和链接]
+        B1 --> B1d[货币金额]
+        
+        B2 --> B2a[结构化产品]
+        B2 --> B2b[文章元数据]
+        B2 --> B2c[用户评论]
+        B2 --> B2d[导航链接]
+        
+        B3 --> B3a[情感分析]
+        B3 --> B3b[关键主题]
+        B3 --> B3c[实体识别]
+        B3 --> B3d[内容摘要]
+    end
+    
+    B1a --> C[结果合并器]
+   极速提取 --> C
+    B1c --> C
+    B1d --> C
+    
+    B2a --> C
+    B2b --> C
+    B2c -->极速提取
+    B2d --> C
+    
+    B3a --> C
+    B3b --> C
+    B3c --> C
+    B3d --> C
+    
+    C --> D[合并的JSON输出]
+    D --> E[最终CrawlResult]
+    
+    style B1 fill:#极速提取
+    style B2 fill:#e3f2fd
+    style B3 fill:#fff3e0
+    style C fill:#f3e5f5
+```
+
+### 性能对比矩阵
+
+```mermaid
+graph TD
+    subgraph "策略性能"
+        A[提取策略对比]
+        
+        subgraph "速度 ⚡"
+            S1[正则表达式: ~10ms]
+            S2[CSS模式: ~50ms]
+            S3[XPath: ~100ms]
+            S4[LLM: ~2-10s]
+        end
+        
+        subgraph "准确度 🎯"
+            A1[正则表达式: 依赖模式]
+            A2[CSS: 对结构化内容高]
+            A3[XPath: 非常高]
+            A4[LLM: 对复杂内容优秀]
+        end
+        
+        subgraph "成本 💰"
+            C1[正则表达式: 免费]
+            C2[CSS: 免费]
+            C3[XPath: 免费]
+            C4[极速提取: 每页$0.001-0.01]
+        end
+        
+        subgraph "复杂度 🔧"
+            X1[正则表达式: 仅简单模式]
+            X2[CSS: 结构化HTML]
+            X3[XPath: 复杂选择器]
+            X4[LLM: 任意内容类型]
+        end
+    end
+    
+    style S1 fill:#极速提取
+    style S2 fill:#e8f5e极速提取
+    style S3 fill:#fff3e0
+    style S4 fill:#ffcdd2
+    
+    style A2 fill:#e8f5e极速提取
+    style A3 fill:#极速提取
+    style A4 fill:#极速提取
+    
+    style C1 fill:#极速提取
+    style C2 fill:#极速提取
+    style C3 fill:#极速提取
+    style C4 fill:#fff3e0
+    
+    style X1 fill:#ffcdd2
+    style X2 fill:#e8f5e极速提取
+    style X3 fill:#极速提取
+    style X4 fill:#极速提取
+```
+
+### 正则表达式模式策略流程
+
+```mermaid
+flowchart TD
+    A[正则表达式提取] --> B{模式来源?}
+    
+    B -->|内置| C[使用预定义模式]
+    B -->|自定义| D[定义自定义正则]
+    B -->|LLM生成| E[使用AI生成]
+    
+    C --> C1[邮箱模式]
+    C --> C2[电话模式]
+    C --> C3[URL模式]
+    C --> C4[货币模式]
+    C --> C5[日期模式]
+    
+    D --> D1[编写自定义正则]
+    D --> D2[测试模式]
+    D --> D3{模式有效?}
+    D3 -->|否| D1
+    D3 -->|是| D4[使用模式]
+    
+    E --> E1[提供样本内容]
+    E --> E2[LLM分析内容]
+    E --> E3[生成优化正则]
+    E --> E4[缓存模式以供复用]
+    
+    C1 --> F[模式匹配]
+    C2 --> F
+    C3 --> F
+    C4 --> F
+    C5 --> F
+    D4 --> F
+    E4 --> F
+    
+    F --> G[提取匹配项]
+    G --> H[按模式类型分组]
+    H --> I[带标签的JSON输出]
+    
+    style C fill:#e8f5e极速提取
+    style D fill:#e3f2fd
+    style E fill:#fff3e0
+    style F fill:#f3e5f5
+```
+
+### 复杂模式结构可视化
+
+```mermaid
+graph TB
+    subgraph "电商模式示例"
+        A[Category baseSelector] --> B[Category Fields]
+        A --> C[Products nested_list]
+        
+        B --> B1[category_name]
+        B --> B2[category_id attribute]
+        B --> B3[category_url attribute]
+        
+        C --> C1[Product baseSelector]
+        C1 --> C2[name text]
+        C1 --> C3[price text]
+        C1 --> C4[Details nested object]
+        C1 --> C5[Features list]
+        C1 --> C6[Reviews nested_list]
+        
+        C4 --> C4a[brand text]
+        C4 --> C4b[model text]
+        C4 --> C4c[specs html]
+        
+        C5 --> C5a[feature text array]
+        
+        C6 --> C6a[reviewer text]
+        C6 --> C6b[rating attribute]
+        C6 --> C6c[comment text]
+        C极速提取 --> C6d[date attribute]
+    end
+    
+    subgraph "JSON输出结构"
+        D[categories array] --> D1[category object]
+        D1 --> D2[category_name]
+        D1 --> D3[category_id]
+        D1 --> D4[products array]
+        
+        D4 --> D5[product object]
+        D5 --> D6[name, price]
+        D5 --> D7[details object]
+        D5 --> D8[features array]
+        D5 --> D9[reviews array]
+        
+        D7 --> D7a[brand, model, specs]
+        D8 --> D8a[feature strings]
+        D9 --> D9a[review objects]
+    end
+    
+    A -.-> D
+    B1 -.-> D2
+    C2 -.-> D6
+    C4 -.-> D7
+    C5 -.-> D8
+    C6 -.-> D9
+    
+    style A fill:#e3f2fd
+    style C fill:#f3e5f5
+    style C4 fill:#e8f5e极速提取
+    style D fill:#fff3e0
+```
+
+### 错误处理与回退策略
+
+```mermaid
+stateDiagram-v2
+    [*] --> 主策略
+    
+    主策略 --> 成功: 提取成功
+    主策略 --> 验证失败: 无效数据
+    主策略 --> 提取失败: 无匹配项
+    主策略 --> 超时错误: LLM超时
+    
+    验证失败 --> 回退策略: 尝试替代方案
+    提取失败 --> 回退策略: 尝试替代方案
+    超时错误 --> 回退策略: 尝试替代方案
+    
+    回退策略 --> 回退成功: 回退有效
+    回退策略 --> 回退失败: 所有策略失败
+    
+    回退成功 --> 成功: 返回结果
+    回退失败 --> 错误报告: 记录失败详情
+    
+    成功 --> [*]: 完成
+    错误报告 --> [*]: 返回空结果
+    
+    note right of 主策略 : 优先尝试最快/最准确的方法
+    note right of 回退策略 : 使用简单但可靠的方法
+    note left of 错误报告 : 提供调试信息
+```
+
+### 令牌使用与成本优化
+
+```mermaid
+flowchart TD
+    A[LLM提取请求] --> B{内容大小检查}
+    
+    B -->|小 < 1200令牌| C[单次LLM调用]
+    B -->|大 > 1200令牌| D[分块策略]
+    
+    C --> C1[发送完整内容]
+    C1 --> C2[解析JSON响应]
+    C2 --> C3[跟踪令牌使用]
+    
+    D --> D1[分割为块]
+    D1 --> D2[添加块间重叠]
+    D2 --> D3[并行处理块]
+    
+    D3 --> D4[块1 → LLM]
+    D3 --> D5[块2 → LLM]
+    D3 --> D6[块N → LLM]
+    
+    D4 --> D7[合并结果]
+    D5 --> D7
+    D6 --> D7
+    
+    D7 --> D8[去重数据]
+    D8 --> D9[汇总令牌使用]
+    
+    C3 --> E[成本计算]
+    D9 --> E
+    
+    E --> F[使用报告]
+    F --> F1[提示令牌: X]
+    F --> F2[完成令牌: Y]
+    F --> F3[总成本: $Z]
+    
+    style C fill:#极速提取
+    style D fill:#fff3e0
+    style E fill:#e3f2fd
+    style F fill:#f3极速提取
+```
+
+**📖 了解更多:** [LLM策略](https://docs.crawl4ai.com/extraction/llm-strategies/), [基于模式的提取](https://docs.crawl4ai.com/extraction/no-llm-strategies/), [模式匹配](https://docs.crawl4ai.com/extraction/no-llm-strategies/#regexextractionstrategy), [性能优化](https://docs.crawl4ai.com/advanced/multi-url-crawling/)

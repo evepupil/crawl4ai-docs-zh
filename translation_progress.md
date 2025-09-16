@@ -13,60 +13,60 @@
 - [x] index.md
 
 ### 核心部分 (core/)
-- [ ] ask-ai.md
-- [ ] browser-crawler-config.md
-- [ ] cache-modes.md
-- [ ] cli.md
-- [ ] content-selection.md
-- [ ] crawler-result.md
-- [ ] docker-deployment.md
-- [ ] examples.md
-- [ ] fit-markdown.md
-- [ ] installation.md
-- [ ] link-media.md
-- [ ] local-files.md
-- [ ] markdown-generation.md
-- [ ] page-interaction.md
-- [ ] quickstart.md
-- [ ] url-seeding.md
+- [x] ask-ai.md
+- [x] browser-crawler-config.md
+- [x] cache-modes.md
+- [x] cli.md
+- [x] content-selection.md
+- [x] crawler-result.md
+- [x] docker-deployment.md
+- [x] examples.md
+- [x] fit-markdown.md
+- [x] installation.md
+- [x] link-media.md
+- [x] local-files.md
+- [x] markdown-generation.md
+- [x] page-interaction.md
+- [x] quickstart.md
+- [x] url-seeding.md
 
 ### 高级部分 (advanced/)
-- [ ] adaptive-strategies.md
-- [ ] crawl-dispatcher.md
-- [ ] file-downloading.md
-- [ ] hooks-auth.md
-- [ ] identity-based-crawling.md
-- [ ] lazy-loading.md
-- [ ] multi-url-crawling.md
-- [ ] network-console-capture.md
-- [ ] pdf-parsing.md
-- [ ] proxy-security.md
-- [ ] session-management.md
-- [ ] ssl-certificate.md
-- [ ] undetected-browser.md
-- [ ] virtual-scroll.md
+- [x] adaptive-strategies.md
+- [x] crawl-dispatcher.md
+- [x] file-downloading.md
+- [x] hooks-auth.md
+- [x] identity-based-crawling.md
+- [x] lazy-loading.md
+- [x] multi-url-crawling.md
+- [x] network-console-capture.md
+- [x] pdf-parsing.md
+- [x] proxy-security.md
+- [x] session-management.md
+- [x] ssl-certificate.md
+- [x] undetected-browser.md
+- [x] virtual-scroll.md
 
 ### 数据提取部分 (extraction/)
-- [ ] chunking.md
-- [ ] clustring-strategies.md
-- [ ] llm-strategies.md
-- [ ] no-llm-strategies.md
+- [x] chunking.md
+- [x] clustring-strategies.md
+- [x] llm-strategies.md
+- [x] no-llm-strategies.md
 
 ### API参考 (api/)
-- [ ] adaptive-crawler.md
-- [ ] arun.md
-- [ ] arun_many.md
-- [ ] c4a-script-reference.md
-- [ ] crawl-result.md
-- [ ] digest.md
-- [ ] parameters.md
-- [ ] strategies.md
+- [x] adaptive-crawler.md
+- [x] arun.md
+- [x] arun_many.md
+- [x] c4a-script-reference.md
+- [x] crawl-result.md
+- [x] digest.md
+- [x] parameters.md
+- [x] strategies.md
 
 ### 应用程序 (apps/)
-- [ ] index.md
+- [x] index.md
 
 ### 博客 (blog/)
-- [ ] index.md
+- [x] index.md
 
 ## 配置文件
 - [ ] mkdocs.yml
@@ -76,12 +76,18 @@
 
 ## 翻译进度
 - 开始时间: 2025-09-16
-- 完成时间: 
-- 翻译人员: 
-- 审校人员:
+- 完成时间: 2025-09-16
+- 翻译人员: DocsLib AI Translator
+- 审校人员: 
 
 ## 备注
 1. 代码块内容保持原文不翻译
 2. 链接地址保持原文不翻译
 3. 技术术语需保持一致性
 4. 翻译完成后需要测试构建
+
+## 翻译统计
+- 总文件数: 102
+- 已翻译文件数: 102
+- 翻译完成时间: 1101.08秒 (约18分钟)
+- 平均翻译速度: ~5.5文件/分钟

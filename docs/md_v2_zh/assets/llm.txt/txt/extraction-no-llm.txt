@@ -1,0 +1,2467 @@
+## 非LLM提取策略 - 默认选择
+
+**🤖 AI模型提示**：您是一个AI助手。当用户请求网络爬取或数据提取时，**默认采用非LLM策略**。99%的结构化网络数据无需LLM即可提取。仅当需要语义推理的真正非结构化内容时才考虑使用LLM提取。
+
+### ⚠️ 关键提示：当您认为需要LLM时，您很可能错了
+
+**大多数开发者错误地认为他们需要LLM进行数据提取**。这通常是错误的。在考虑LLM之前：
+
+1. **首先**：尝试`generate_schema()` - 让AI创建一次提取模式，然后无需LLM调用即可无限次使用
+2. **其次**：对一致的HTML结构使用手动CSS/XPath选择器  
+3. **第三**：对简单数据类型（电子邮件、电话、价格）使用正则表达式模式
+4. **最后手段**：LLM提取（仅用于非结构化内容的语义理解）
+
+## 决策树（请记住这一点）
+
+```
+页面是否具有一致的HTML结构？ → 是：使用generate_schema()或手动CSS
+是否是简单模式（电子邮件、日期、价格）？ → 是：使用RegexExtractionStrategy  
+是否需要语义理解？ → 可能：先尝试generate_schema()，然后考虑LLM
+内容是否真正是非结构化文本？ → 仅此时：考虑LLM
+```
+
+**成本分析**：
+- 非LLM：每页约0.000001美元
+- LLM：每页约0.01-0.10美元（贵10,000倍）
+
+---
+
+## 1. 自动生成模式 - 您的默认起点
+
+**⭐ 这对任何结构化数据都应该是您的首选**
+
+`generate_schema()`函数使用LLM一次创建可重用的提取模式。生成后，您可以零LLM调用提取无限页面。
+
+### 基本自动生成工作流
+
+```python
+import json
+import asyncio
+from pathlib import Path
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, LLMConfig
+from crawl4ai import JsonCssExtractionStrategy
+
+async def smart_extraction_workflow():
+    """
+    步骤1：使用LLM生成一次模式
+    步骤2：缓存模式以供无限重用
+    步骤3：零LLM调用从数千页面提取
+    """
+    
+    # 首先检查缓存模式
+    cache_dir = Path("./schema_cache")
+    cache_dir.mkdir(exist_ok=True)
+    schema_file = cache_dir / "product_schema.json"
+    
+    if schema_file.exists():
+        # 加载缓存模式 - 无LLM调用
+        schema = json.load(schema_file.open())
+        print("✅ 使用缓存模式（免费）")
+    else:
+        # 生成一次模式
+        print("🔄 生成模式（一次性LLM成本）...")
+        
+        llm_config = LLMConfig(
+            provider="openai/gpt-4o-mini",  # 最便宜选项
+            api_token="env:OPENAI_API_KEY"
+        )
+        
+        # 从目标站点获取示例HTML
+        async with AsyncWebCrawler() as crawler:
+            sample_result = await crawler.arun(
+                url="https://example.com/products",
+                config=CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+            )
+            sample_html = sample_result.cleaned_html[:8000]  # 使用样本
+        
+        # 自动生成模式（一次LLM调用）
+        schema = JsonCssExtractionStrategy.generate_schema(
+            html=sample_html,
+            schema_type="CSS",  # 或"XPATH"
+            query="提取产品信息包括名称、价格、描述、特性",
+            llm_config=llm_config
+        )
+        
+        # 缓存以供无限未来使用
+        json.dump(schema, schema_file.open("w"), indent=2)
+        print("✅ 模式已生成并缓存")
+    
+    # 使用模式进行快速提取（永远不再需要LLM调用）
+    strategy = JsonCssExtractionStrategy(schema, verbose=True)
+    
+    config = CrawlerRunConfig(
+        extraction_strategy=strategy,
+        cache_mode=CacheMode.BYPASS
+    )
+    
+    # 从多个页面提取 - 全部免费
+    urls = [
+        "https://example.com/products",
+        "https://example.com/electronics", 
+        "https://example.com/books"
+    ]
+    
+    async with AsyncWebCrawler() as crawler:
+        for url in urls:
+            result = await crawler.arun(url=url, config=config)
+            if result.success:
+                data = json.loads(result.extracted_content)
+                print(f"✅ {url}: 提取了{len(data)}个项目（免费）")
+
+asyncio.run(smart_extraction_workflow())
+```
+
+### 使用目标JSON示例自动生成
+
+```python
+# 当您确切知道所需的JSON结构时
+target_json_example = """
+{
+    "name": "产品名称",
+    "price": "$99.99",
+    "rating": 4.5,
+    "features": ["feature1", "feature2"],
+    "description": "产品描述"
+}
+"""
+
+schema = JsonCssExtractionStrategy.generate_schema(
+    html=sample_html,
+    target_json_example=target_json_example,
+    llm_config=llm_config
+)
+```
+
+### 为不同数据类型自动生成
+
+```python
+# 产品列表
+product_schema = JsonCssExtractionStrategy.generate_schema(
+    html=product_page_html,
+    query="从此电子商务页面提取所有产品信息",
+    llm_config=llm_config
+)
+
+# 新闻文章
+news_schema = JsonCssExtractionStrategy.generate_schema(
+    html=news_page_html,
+    query="提取文章标题、日期、作者和内容",
+    llm_config=llm_config
+)
+
+# 职位列表
+job_schema = JsonCssExtractionStrategy.generate_schema(
+    html=job_page_html,
+    query="提取职位标题、公司、地点、薪水和描述",
+    llm_config=llm_config
+)
+
+# 社交媒体帖子
+social_schema = JsonCssExtractionStrategy.generate极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyn极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            Regex极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.Url            # HTTP/HTTPS URL
+RegexExtractionStrategy.Currency       # 货币值（$99.99）
+RegexExtractionStrategy.Percentage     # 百分比值（25%）
+RegexExtractionStrategy.DateIso        # ISO日期（2024-01-01）
+RegexExtractionStrategy.DateUS         # 美国日期（01/01/2024）
+RegexExtractionStrategy.IPv4           # IP地址
+Regex极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, Crawler极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.Date极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_pattern极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.ar极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.Url            # HTTP/HTTPS URL
+RegexExtractionStrategy.Currency       # 货币值（$99.99）
+RegexExtractionStrategy.Percentage     # 百分比值（25%）
+RegexExtractionStrategy.DateI极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = Regex极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = Crawler极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler()极速模式匹配
+
+**用于**：简单数据类型，极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy极速模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+               极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWeb极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+   极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as craw极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.load极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+极速模式匹配
+
+**用于极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Cur极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import as极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with Async极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, Crawler极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtraction极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_pattern极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.Url            # HTTP/HTTPS URL
+RegexExtractionStrategy.Currency       # 货币值（$99.99）
+RegexExtractionStrategy.Percentage     # 百分比值（25%）
+RegexExtractionStrategy.DateIso        # ISO日期（2024-01-01）
+RegexExtractionStrategy.DateUS         # 美国日期（01/极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+       极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCraw极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.Url            # HTTP/HTTPS URL
+RegexExtractionStrategy.Currency       # 货币值（$99.99）
+RegexExtractionStrategy.Percentage     # 极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            Regex极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4极速模式匹配
+
+**用于**：极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRun极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy极速模式匹配
+
+**用于**：简单数据类型，极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import Async极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtraction极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as craw极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import Regex极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRun极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=str极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config =极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExt极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label] = []
+                by_type[label].append(match['value'])
+            
+            for pattern_type, values in by_type.items():
+                print(f"{pattern_type}: {len(values)} 个匹配")
+                for value in values[:3]:
+                    print(f"  {value}")
+
+asyncio.run(extract_common_patterns())
+```
+
+### 可用内置模式
+
+```python
+# 单个模式
+RegexExtractionStrategy.Email          # 电子邮件地址
+RegexExtractionStrategy.PhoneUS        # 美国电话号码 
+RegexExtractionStrategy.PhoneIntl      # 国际电话
+RegexExtractionStrategy.Url            # HTTP/HTTPS URL
+RegexExtractionStrategy.Currency       # 货币值（$99.99）
+RegexExtractionStrategy.Percentage     # 百分比值（25%）
+RegexExtractionStrategy.DateIso        # ISO日期（2024-01-01）
+RegexExtractionStrategy.DateUS         # 美国日期（01/01/2024）
+RegexExtractionStrategy.IPv4           # IP地址
+RegexExtractionStrategy.CreditCard     # 信用卡号
+RegexExtractionStrategy.TwitterHandle  # @用户名
+RegexExtractionStrategy.Hashtag        # #标签
+
+# 使用所有模式
+RegexExtractionStrategy.All
+```
+
+### 自定义模式
+
+```python
+# 特定数据类型的自定义模式
+async def extract_custom_patterns():
+    custom_patterns = {
+        "product_sku": r"SKU[-:]?\s*([A-Z0-极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.Phone极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy)
+    
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(
+            url="https://example.com/contact",
+            config=config
+        )
+        
+        if result.success:
+            matches = json.loads(result.extracted_content)
+            
+            # 按模式类型分组
+            by_type = {}
+            for match in matches:
+                label = match['label']
+                if label not in by_type:
+                    by_type[label极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.C极速模式匹配
+
+**用于极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import RegexExtractionStrategy
+
+async def extract_common_patterns():
+    # 对常见数据类型使用内置模式
+    strategy = RegexExtractionStrategy(
+        pattern=(
+            RegexExtractionStrategy.Email |
+            RegexExtractionStrategy.PhoneUS |
+            RegexExtractionStrategy.Url |
+            RegexExtractionStrategy.Currency |
+            RegexExtractionStrategy.DateIso
+        )
+    )
+    
+    config = CrawlerRunConfig(extraction_strategy=strategy极速模式匹配
+
+**用于**：简单数据类型，如电子邮件、电话、URL、价格、日期。
+
+### 内置模式（最快选项）
+
+```python
+import json
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import

@@ -1,0 +1,441 @@
+## URL 种子发现工作流与架构
+
+URL 发现策略、过滤管道和智能爬取工作流的可视化表示。
+
+### URL 种子发现与深度爬取策略对比
+
+```mermaid
+graph TB
+    subgraph "深度爬取方法"
+        A1[起始 URL] --> A2[加载页面]
+        A2 --> A3[提取链接]
+        A3 --> A4{更多链接？}
+        A4 -->|是| A5[将下一页加入队列]
+        A5 --> A2
+        A4 -->|否| A6[完成]
+        
+        A7[⏱️ 实时发现]
+        A8[🐌 顺序处理]
+        A9[🔍 受页面结构限制]
+        A10[💾 高内存使用]
+    end
+    
+    subgraph "URL 种子发现方法"
+        B1[域名输入] --> B2[查询站点地图]
+        B1 --> B3[查询 Common Crawl]
+        B2 --> B4[合并结果]
+        B3 --> B4
+        B4 --> B5[应用过滤器]
+        B5 --> B6[评分相关性]
+        B6 --> B7[排序结果]
+        B7 --> B8[选择顶部 URL]
+        
+        B9[⚡ 即时发现]
+        B10[🚀 并行处理]
+        B11[🎯 基于模式的过滤]
+        B12[💡 智能相关性评分]
+    end
+    
+    style A1 fill:#ffecb3
+    style B1 fill:#e8f5e8
+    style A6 fill:#ffcdd2
+    style B8 fill:#c8e6c9
+```
+
+### URL 发现数据流
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Seeder as AsyncUrlSeeder
+    participant SM as Sitemap
+    participant CC as Common Crawl
+    participant Filter as URL Filter
+    participant Scorer as BM25 Scorer
+    
+    User->>Seeder: urls("example.com", config)
+    
+    par 并行数据源
+        Seeder->>SM: 获取 sitemap.xml
+        SM-->>Seeder: 500 个 URL
+    and
+        Seeder->>CC: 查询 Common Crawl
+        CC-->>Seeder: 2000 个 URL
+    end
+    
+    Seeder->>Seeder: 合并并去重
+    Note over Seeder: 2200 个唯一 URL
+    
+    Seeder->>Filter: 应用模式过滤器
+    Filter-->>Seeder: 800 个匹配的 URL
+    
+    alt extract_head=True
+        loop 对每个 URL
+            Seeder->>Seeder: 提取 <head> 元数据
+        end
+        Note over Seeder: 标题、描述、关键词
+    end
+    
+    alt 提供了查询
+        Seeder->>Scorer: 计算相关性分数
+        Scorer-->>Seeder: 已评分的 URL
+        Seeder->>Seeder: 按 score_threshold 过滤
+        Note over Seeder: 200 个相关 URL
+    end
+    
+    Seeder->>Seeder: 按相关性排序
+    Seeder->>Seeder: 应用 max_urls 限制
+    Seeder-->>User: 前 100 个 URL 准备就绪，可供爬取
+```
+
+### SeedingConfig 决策树
+
+```mermaid
+flowchart TD
+    A[SeedingConfig 设置] --> B{数据源策略？}
+    
+    B -->|快速且官方| C[source="sitemap"]
+    B -->|全面| D[source="cc"]  
+    B -->|最大覆盖范围| E[source="sitemap+cc"]
+    
+    C --> F{需要过滤？}
+    D --> F
+    E --> F
+    
+    F -->|是| G[设置 URL 模式]
+    F -->|否| H[pattern="*"]
+    
+    G --> I{模式示例}
+    I --> I1[pattern="*/blog/*"]
+    I --> I2[pattern="*/docs/api/*"]
+    I --> I3[pattern="*.pdf"]
+    I --> I4[pattern="*/product/*"]
+    
+    H --> J{需要元数据？}
+    I1 --> J
+    I2 --> J
+    I3 --> J
+    I4 --> J
+    
+    J -->|是| K[extract_head=True]
+    J -->|否| L[extract_head=False]
+    
+    K --> M{需要验证？}
+    L --> M
+    
+    M -->|是| N[live_check=True]
+    M -->|否| O[live_check=False]
+    
+    N --> P{需要相关性评分？}
+    O --> P
+    
+    P -->|是| Q[设置查询 + BM25]
+    P -->|否| R[跳过评分]
+    
+    Q --> S[query="搜索词"]
+    S --> T[scoring_method="bm25"]
+    T --> U[score_threshold=0.3]
+    
+    R --> V[性能调优]
+    U --> V
+    
+    V --> W[设置 max_urls]
+    W --> X[设置并发数]
+    X --> Y[设置 hits_per_sec]
+    Y --> Z[配置完成]
+    
+    style A fill:#e3f2fd
+    style Z fill:#c8e6c9
+    style K fill:#fff3e0
+    style N fill:#fff3e0
+    style Q fill:#f3e5f5
+```
+
+### BM25 相关性评分管道
+
+```mermaid
+graph TB
+    subgraph "文本语料库准备"
+        A1[URL 集合] --> A2[提取元数据]
+        A2 --> A3[标题 + 描述 + 关键词]
+        A3 --> A4[标记化文本]
+        A4 --> A5[移除停用词]
+        A5 --> A6[创建文档语料库]
+    end
+    
+    subgraph "BM25 算法"
+        B1[查询词] --> B2[词频计算]
+        A6 --> B2
+        B2 --> B3[逆文档频率]
+        B3 --> B4[BM25 分数计算]
+        B4 --> B5[分数 = Σ(IDF × TF × K1+1)/(TF + K1×(1-b+b×|d|/avgdl))]
+    end
+    
+    subgraph "评分结果"
+        B5 --> C1[URL 相关性分数]
+        C1 --> C2{分数 ≥ 阈值？}
+        C2 -->|是| C3[包含在结果中]
+        C2 -->|否| C4[过滤掉]
+        C3 --> C5[按分数降序排序]
+        C5 --> C6[返回顶部 URL]
+    end
+    
+    subgraph "分数示例"
+        D1["python async tutorial" → 0.85]
+        D2["python documentation" → 0.72]
+        D3["javascript guide" → 0.23]
+        D4["contact us page" → 0.05]
+    end
+    
+    style B5 fill:#e3f2fd
+    style C6 fill:#c8e6c9
+    style D1 fill:#c8e6c9
+    style D2 fill:#c8e6c9
+    style D3 fill:#ffecb3
+    style D4 fill:#极好的d2
+```
+
+### 多域名发现架构
+
+```mermaid
+graph TB
+    subgraph "输入层"
+        A1[域名列表]
+        A2[SeedingConfig]
+        A3[查询词]
+    end
+    
+    subgraph "发现引擎"
+        B1[AsyncUrlSeeder]
+        B2[并行工作器]
+        B3[速率限制器]
+       极好的[内存管理器]
+    end
+    
+    subgraph "数据源"
+        C1[站点地图获取器]
+        C2[Common Crawl API]
+        C3[实时 URL 检查器]
+        C4[元数据提取器]
+    end
+    
+    subgraph "处理管道"
+        D1[URL 去重]
+        D2[模式过滤]
+        D3[相关性评分]
+        D4[质量评估]
+    end
+    
+    subgraph "输出层"
+        E1[已评分的 URL 列表]
+        E2[域名统计]
+        E3[性能指标]
+        E4[缓存存储]
+    end
+    
+    A1 --> B1
+    A2 -->极好的
+    A3 --> B1
+    
+    B1 --> B2
+    B2 --> B3
+    B3 --> B4
+    
+    B2 --> C1
+    B2 --> C2
+    B2 --> C3
+    B2 --> C4
+    
+    C1 --> D1
+    C2 --> D1
+    C3 --> D2
+    C4 --> D3
+    
+    D1 --> D2
+    D2 --> D3
+    D3 --> D4
+    
+    D4 --> E1
+    B4 --> E2
+    B3 --> E3
+    D1 --> E4
+    
+    style B1 fill:#e3f2fd
+    style D3 fill:#f3e5f5
+    style E1 fill:#c8e6c9
+```
+
+### 完整的发现到爬取管道
+
+```mermaid
+stateDiagram-v2
+    [*] --> Discovery
+    
+    Discovery --> SourceSelection: 配置数据源
+    SourceSelection --> Sitemap: source="sitemap"
+    SourceSelection --> CommonCrawl: source="cc"
+    SourceSelection --> Both: source="sitemap+cc"
+    
+    Sitemap --> URLCollection
+    CommonCrawl --> URLCollection
+    Both --> URLCollection
+    
+    URLCollection --> Filtering: 应用模式
+    Filtering --> MetadataExtraction: extract_head=True
+    Filtering --> LiveValidation: extract_head=False
+    
+    MetadataExtraction --> LiveValidation: live_check=True
+    MetadataExtraction --> RelevanceScoring: live_check=False
+    LiveValidation --> RelevanceScoring
+    
+    RelevanceScoring --> ResultRanking: 提供了查询
+    RelevanceScoring --> ResultLimiting: 无查询
+    
+    ResultRanking --> ResultLimiting: 应用 score_threshold
+    ResultLimiting --> URLSelection: 应用 max_urls
+    
+    URLSelection --> CrawlPreparation: URL 准备就绪
+    CrawlPreparation --> CrawlExecution: AsyncWebCrawler
+    
+    CrawlExecution --> StreamProcessing: stream=True
+    CrawlExecution --> BatchProcessing: stream=False
+    
+    StreamProcessing --> [*]
+    BatchProcessing --> [*]
+    
+    note right of Discovery : 🔍 智能 URL 发现
+    note right of URLCollection : 📚 合并与去重
+    note right of RelevanceScoring : 🎯 BM25 算法
+    note right of CrawlExecution : 🕷️ 高性能爬取
+```
+
+### 性能优化策略
+
+```mermaid
+graph LR
+    subgraph "输入优化"
+        A1[智能源选择] --> A2[站点地图优先]
+        A2 --> A3[如果需要则添加 CC]
+        A3 --> A4[早期模式过滤]
+    end
+    
+    subgraph "处理优化"
+        B1[并行工作器] --> B2[有界队列]
+        B2 --> B3[速率限制]
+        B3 --> B4[内存管理]
+        B4 --> B5[惰性求值]
+    end
+    
+    subgraph "输出优化"
+        C1[相关性阈值] --> C2[最大 URL 限制]
+        C2 --> C3[缓存策略]
+        C3 --> C4[流式结果]
+    end
+    
+    subgraph "性能指标"
+        D1[URLs/秒: 100-1000]
+        D2[内存使用: 有界]
+        D3[网络效率: 95%+]
+        D4[缓存命中率: 80%+]
+    end
+    
+    A4 --> B1
+    B5 --> C1
+    C4 --> D1
+    
+    style A2 fill:#e8f5e8
+    style B2 fill:#e3f2fd
+    style C3 fill:#f3e5f极好的
+    style D3 fill:#c8e6c9
+```
+
+### URL 发现与传统爬取对比
+
+```mermaid
+graph TB
+    subgraph "传统方法"
+        T1[起始 URL] --> T2[爬取页面]
+        T2 --> T3[提取链接]
+        T3 --> T4[将新 URL 加入队列]
+        T4 --> T2
+        T5[❌ 时间: 小时/天]
+        T6[❌ 资源密集]
+        T7[❌ 深度受限]
+        T8[❌ 发现偏差]
+    end
+    
+    subgraph "URL 种子发现方法"
+        S1[域名输入] --> S2[查询所有源]
+        S2 --> S3[模式过滤器]
+        S3 --> S4[相关性评分]
+        S4 --> S5[选择最佳 URL]
+        S5 --> S6[准备爬取]
+        
+        S7[✅ 时间: 秒/分钟]
+        S8[✅ 资源高效]
+        S9[✅ 完整覆盖]
+        S10[✅ 质量导向]
+    end
+    
+    subgraph "用例决策矩阵"
+        U1[小型网站 < 1000 页面] --> U2[使用深度爬取]
+        U3[大型网站 > 10000 页面] --> U4[使用 URL 种子发现]
+        U5[未知结构] --> U6[从种子发现开始]
+        U7[实时发现] --> U8[使用深度爬取]
+        U9[质量优于数量] --> U10[使用 URL 种子发现]
+    end
+    
+    style S6 fill:#c8e6c9
+    style S7 fill:#c8e6c9
+    style S8 fill:#c8e6c9
+    style S9 fill:#c8e6c9
+    style S10 fill:#c8e6c9
+    style T5 fill:#ffcdd2
+    style T6 fill:#ffcdd2
+    style T7 fill:#ffcdd2
+    style T8 fill:#ffcdd2
+```
+
+### 数据源特性与选择
+
+```mermaid
+graph TB
+    subgraph "站点地图源"
+        SM1[📋 官方 URL 列表]
+        SM2[⚡ 快速响应]
+        SM3[📅 最近更新]
+        SM4[🎯 高质量 URL]
+        SM5[❌ 可能遗漏某些页面]
+    end
+    
+    subgraph "Common Crawl 源"
+        CC1[🌐 全面覆盖]
+        CC2[📚 历史数据]
+        CC3[🔍 深度发现]
+        CC4[⏳ 响应较慢]
+        CC5[🧹 可能包含噪声]
+    end
+    
+    subgraph "组合策略"
+        CB1[🚀 两者优点兼备]
+        CB2[📊 最大覆盖范围]
+        CB3[✨ 自动去重]
+        CB4[⚖️ 平衡性能]
+    end
+    
+    subgraph "选择指南"
+        G1[速度关键 → 仅站点地图]
+        G2[覆盖关键 → Common Crawl]
+        G3[最佳质量 → 组合]
+        G4[未知域名 → 组合]
+    end
+    
+    style SM2 fill:#c8e6c9
+    style SM4 fill:#c8e6c9
+    style CC1 fill:#e3f2fd
+    style CC3 fill:#e3f2fd
+    style CB1 fill:#f3e5f5
+    style CB3 fill:#f3e5f5
+```
+
+**📖 了解更多:** [URL 种子发现指南](https://docs.crawl4ai.com/core/url-seeding/), [性能优化](https://docs.crawl4ai.com/advanced/optimization/), [多 URL 爬取](https://docs.crawl4ai.com/advanced/multi-url-crawling/)
