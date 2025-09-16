@@ -1,0 +1,54 @@
+# 手动翻译器配置文件
+
+# 手动翻译器特有设置
+manual_translator:
+  # 要翻译的文件类型
+  file_types:
+    - ".md"
+    - ".mdx"
+    - ".txt"
+    - ".html"
+    - ".json"
+  
+  # 要排除的文件或目录模式
+  exclude_patterns:
+    - "__pycache__"
+    - ".git"
+    - ".github"
+    - "node_modules"
+    - "venv"
+    - ".venv"
+    - ".env"
+    - "build"
+    - "dist"
+    - ".cache"
+  
+  # 是否复制静态资源
+  copy_static_assets: true
+  
+  # 静态资源文件类型
+  static_extensions:
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".svg"
+    - ".ico"
+    - ".css"
+    - ".scss"
+    - ".less"
+    - ".woff"
+    - ".woff2"
+    - ".eot"
+    - ".ttf"
+    - ".otf"
+    - ".pdf"
+    - ".doc"
+    - ".docx"
+    - ".xls"
+    - ".xlsx"
+    - ".ppt"
+    - ".pptx"
+  
+  # 最大工作线程数
+  max_workers: 5 

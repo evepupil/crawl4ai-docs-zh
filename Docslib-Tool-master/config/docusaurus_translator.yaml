@@ -1,0 +1,80 @@
+# Docusaurus 翻译器配置
+
+# 翻译设置
+docusaurus_translator:
+  # 是否复制静态资源文件
+  copy_static_assets: true
+  
+  # 是否复制未翻译的文件
+  copy_untranslated_files: true
+  
+  # 需要翻译的文件扩展名
+  translate_extensions:
+    - .md
+    - .mdx
+    - .jsx
+    - .tsx
+    - .js
+    - .ts
+  
+  # 需要特殊处理的文件
+  special_files:
+    - docusaurus.config.js
+    - sidebars.js
+    - sidebars.json
+  
+  # 可翻译目录
+  translatable_dirs:
+    - docs          # 标准文档目录
+    - blog          # 博客目录
+    - src           # 源代码目录
+    - website/docs  # 有些项目将文档放在 website/docs 下
+    - website/blog  # 有些项目将博客放在 website/blog 下
+    - website/src   # 有些项目将源代码放在 website/src 下
+    - packages/docs # monorepo 结构中的文档目录
+    - website/pages # 有些旧版本使用 pages 而不是 src/pages
+    - i18n          # 国际化目录
+    - content/docs  # 有些项目使用 content/docs 目录
+    - content/blog  # 有些项目使用 content/blog 目录
+  
+  # 排除的文件和目录
+  exclude_patterns:
+    - __pycache__
+    - .git
+    - .github
+    - node_modules
+    - build
+    - .docusaurus
+    - venv
+    - .venv
+    - .env
+    - translated_docs
+    - versioned_docs
+    - node_modules
+    - lib
+    - dist
+  
+  # 静态资源模式
+  static_asset_patterns:
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.gif"
+    - "*.svg"
+    - "*.ico"
+    - "*.css"
+    - "*.scss"
+    - "*.less"
+    - "*.woff"
+    - "*.woff2"
+    - "*.eot"
+    - "*.ttf"
+    - "*.otf"
+    - "*.pdf"
+    - "*.doc"
+    - "*.docx"
+    - "*.xls"
+    - "*.xlsx"
+    - "*.ppt"
+    - "*.pptx"
+    - "*.json"  # 添加JSON文件到静态资源模式 

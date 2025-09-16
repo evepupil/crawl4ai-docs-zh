@@ -1,0 +1,82 @@
+# MkDocs 翻译器配置
+
+# 翻译设置
+translation:
+  source_lang: en
+  target_lang: zh
+  preserve_format: true
+  max_retry: 3
+  concurrent_requests: 5
+
+# 文件处理设置
+file_processing:
+  # 需要翻译的文件扩展名
+  translate_extensions:
+    - .md
+    - .txt
+    - .html
+  
+  # 需要特殊处理的文件
+  special_files:
+    - mkdocs.yml
+    - README.md
+    - index.md
+  
+  # 排除的文件和目录
+  exclude:
+    - .git
+    - .github
+    - __pycache__
+    - .venv
+    - .env
+    - node_modules
+    - site
+    - venv
+    - env
+    - build
+    - dist
+    - .DS_Store
+    - .idea
+    - .vscode
+
+# SEO 设置
+seo:
+  # 默认添加的关键词
+  default_keywords:
+    - 文档
+    - 技术文档
+    - 开发文档
+    - 中文文档
+  
+  # 网站标题后缀
+  title_suffix: " | 中文文档"
+  
+  # 元描述模板
+  description_template: "{title} - 详细的中文技术文档，提供完整的{keywords}指南。"
+
+# MkDocs 特定设置
+mkdocs:
+  # 主题设置
+  theme_adjustments: true
+  
+  # 导航设置
+  nav_adjustments: true
+  
+  # 自定义 CSS
+  add_custom_css: true
+  
+  # 添加语言选择器
+  add_language_selector: true
+  
+  # 自定义页脚
+  custom_footer: true
+  
+  # 自动生成站点地图
+  generate_sitemap: true
+
+# 日志设置
+logging:
+  level: INFO
+  file: logs/mkdocs_translator.log
+  max_size: 10485760  # 10MB
+  backup_count: 5 
