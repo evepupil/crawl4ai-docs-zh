@@ -1,22 +1,11 @@
 {
-  "version": 2,
-  "public": true,
   "builds": [
     {
       "src": "build_vercel.sh",
-      "use": "@vercel/python",
+      "use": "@vercel/static-build",
       "config": {
-        "runtime": "python3.9",
-        "installCommand": "pip install mkdocs mkdocs-terminal"
+        "distDir": "site"
       }
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/site/$1"
-    }
-  ],
-  "buildCommand": "bash build_vercel.sh",
-  "outputDirectory": "site"
+  ]
 }
