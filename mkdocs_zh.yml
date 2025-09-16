@@ -1,0 +1,113 @@
+site_name: Crawl4AI 文档 (v0.7.x)
+site_favicon: docs/md_v2_zh/favicon.ico
+site_description:  🚀🤖 Crawl4AI, 开源的LLM友好型网页爬虫和抓取工具
+site_url: https://docs.crawl4ai.com
+repo_url: https://github.com/unclecode/crawl4ai
+repo_name: unclecode/crawl4ai
+docs_dir: docs/md_v2_zh
+
+nav:
+  - 首页: 'index.md'
+  - "询问AI": "core/ask-ai.md"
+  - "快速开始": "core/quickstart.md"
+  - "代码示例": "core/examples.md"
+  - 应用程序:
+    - "演示应用": "apps/index.md"
+    - "C4A脚本编辑器": "apps/c4a-script/index.html"
+    - "LLM上下文构建器": "apps/llmtxt/index.html"
+  - 设置与安装:
+    - "安装": "core/installation.md"
+    - "Docker部署": "core/docker-deployment.md"
+  - "博客与变更日志":
+    - "博客首页": "blog/index.md"
+    - "变更日志": "https://github.com/unclecode/crawl4ai/blob/main/CHANGELOG.md"
+  - 核心:
+    - "命令行界面": "core/cli.md"
+    - "简单爬取": "core/simple-crawling.md"
+    - "深度爬取": "core/deep-crawling.md"
+    - "自适应爬取": "core/adaptive-crawling.md"
+    - "URL播种": "core/url-seeding.md"
+    - "C4A脚本": "core/c4a-script.md"
+    - "爬虫结果": "core/crawler-result.md"
+    - "浏览器、爬虫和LLM配置": "core/browser-crawler-config.md"
+    - "Markdown生成": "core/markdown-generation.md"
+    - "适合的Markdown": "core/fit-markdown.md"
+    - "页面交互": "core/page-interaction.md"
+    - "内容选择": "core/content-selection.md"
+    - "缓存模式": "core/cache-modes.md"
+    - "本地文件和原始HTML": "core/local-files.md"
+    - "链接与媒体": "core/link-media.md"
+  - 高级:
+    - "概述": "advanced/advanced-features.md"
+    - "自适应策略": "advanced/adaptive-strategies.md"
+    - "虚拟滚动": "advanced/virtual-scroll.md"
+    - "文件下载": "advanced/file-downloading.md"
+    - "懒加载": "advanced/lazy-loading.md"
+    - "钩子与认证": "advanced/hooks-auth.md"
+    - "代理与安全": "advanced/proxy-security.md"
+    - "无痕浏览器": "advanced/undetected-browser.md"
+    - "会话管理": "advanced/session-management.md"
+    - "多URL爬取": "advanced/multi-url-crawling.md"
+    - "爬虫调度器": "advanced/crawl-dispatcher.md"
+    - "基于身份的爬取": "advanced/identity-based-crawling.md"
+    - "SSL证书": "advanced/ssl-certificate.md"
+    - "网络与控制台捕获": "advanced/network-console-capture.md"
+    - "PDF解析": "advanced/pdf-parsing.md"
+  - 提取:
+    - "无LLM策略": "extraction/no-llm-strategies.md"
+    - "LLM策略": "extraction/llm-strategies.md"
+    - "聚类策略": "extraction/clustring-strategies.md"
+    - "分块": "extraction/chunking.md"
+  - API参考:
+    - "异步网页爬虫": "api/async-webcrawler.md"
+    - "arun()": "api/arun.md"
+    - "arun_many()": "api/arun_many.md"
+    - "浏览器、爬虫和LLM配置": "api/parameters.md"
+    - "爬取结果": "api/crawl-result.md"
+    - "策略": "api/strategies.md"
+    - "C4A脚本参考": "api/c4a-script-reference.md"
+
+theme:
+  name: 'terminal'
+  palette: 'dark'
+  custom_dir: docs/md_v2_zh/overrides
+  color_mode: 'dark'
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - tables
+
+extra:
+  version: !ENV [CRAWL4AI_VERSION, 'development']
+
+extra_css:
+  - assets/layout.css
+  - assets/styles.css
+  - assets/highlight.css
+  - assets/dmvendor.css
+  - assets/feedback-overrides.css
+
+extra_javascript:
+  - https://www.googletagmanager.com/gtag/js?id=G-58W0K2ZQ25
+  - assets/gtag.js
+  - assets/highlight.min.js
+  - assets/highlight_init.js
+  - https://buttons.github.io/buttons.js
+  - assets/toc.js
+  - assets/github_stats.js 
+  - assets/selection_ask_ai.js
+  - assets/copy_code.js
+  - assets/floating_ask_ai_button.js
+  - assets/mobile_menu.js
