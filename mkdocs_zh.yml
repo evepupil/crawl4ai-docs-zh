@@ -1,7 +1,7 @@
 site_name: Crawl4AI 文档 (v0.7.x)
 site_favicon: docs/md_v2_zh/favicon.ico
 site_description:  🚀🤖 Crawl4AI, 开源的LLM友好型网页爬虫和抓取工具
-site_url: https://docs.crawl4ai.com
+site_url: https://crawl4ai.docslib.dev
 repo_url: https://github.com/unclecode/crawl4ai
 repo_name: unclecode/crawl4ai
 docs_dir: docs/md_v2_zh
