@@ -106,8 +106,9 @@ extra_javascript:
   - assets/highlight_init.js
   - https://buttons.github.io/buttons.js
   - assets/toc.js
-  - assets/github_stats.js 
+  - assets/github_stats.js
   - assets/selection_ask_ai.js
   - assets/copy_code.js
   - assets/floating_ask_ai_button.js
   - assets/mobile_menu.js
+  - https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1149581082118045
